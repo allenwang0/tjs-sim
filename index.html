@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<!--
+  TRADER JOE'S SIMULATOR
+  ========================
+  Vercel deployment:
+  1. Push all files (index.html, game.js, ui.js, style.css) to a GitHub repo.
+  2. Import repo into Vercel. Framework: Other. Output directory: ./
+  3. Deploy. No build step required.
+
+  Or: drag the folder into vercel.com/new as a static site.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trader Joe's Simulator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     SETUP / LOCATION SELECT SCREEN
+     ============================================================ -->
+<div id="setup-screen" style="display:flex;">
+  <div class="setup-box">
+    <h1>TRADER JOE'S <span>SIMULATOR</span></h1>
+    <div class="tagline">Inventory management &nbsp;/&nbsp; Seasonal cycles &nbsp;/&nbsp; Demand economics</div>
+
+    <div id="prestige-perks-display" style="display:none;"></div>
+
+    <div class="section-head">Select your port, Captain.</div>
+    <div id="loc-grid" class="location-grid"></div>
+
+    <div style="text-align:right;">
+      <button class="btn-accent" id="start-btn">Establish Store</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     MAIN GAME SCREEN
+     ============================================================ -->
+<div id="main-screen" style="display:none;">
+
+  <!-- HEADER -->
+  <div id="app-header">
+    <h1>TRADER JOE'S <span>SIMULATOR</span> &nbsp;// <span id="hdr-loc" style="color:var(--muted);font-weight:400;font-size:12px;">—</span></h1>
+    <div class="header-controls">
+      <span style="font-family:var(--mono);font-size:11px;color:var(--muted);">
+        <span id="hdr-season" style="color:var(--accent);font-weight:700;"></span>
+        &nbsp;<span id="hdr-week"></span>
+      </span>
+      <div class="speed-btns">
+        <span style="color:var(--muted)">Speed:</span>
+        <button class="speed-btn" data-speed="slow" onclick="setSpeed('slow')">Slow</button>
+        <span>|</span>
+        <button class="speed-btn active" data-speed="normal" onclick="setSpeed('normal')">Normal</button>
+        <span>|</span>
+        <button class="speed-btn" data-speed="fast" onclick="setSpeed('fast')">Fast</button>
+      </div>
+      <button class="btn" id="prestige-btn" onclick="openPrestige()">New Store (Prestige)</button>
+      <button class="btn-link" onclick="doHardReset()">Reset</button>
+    </div>
+  </div>
+
+  <!-- THREE-COLUMN GRID -->
+  <div id="game-grid">
+
+    <!-- ========================================================
+         LEFT COLUMN: STORE STATUS, LOCATION, STAFFING
+         ======================================================== -->
+    <div class="col">
+      <div class="section-head">Financial Position</div>
+
+      <div style="margin-bottom:4px;">
+        <div id="cash-display">$75,000</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px;">CASH ON HAND</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">LAST WEEK</div>
+        <div id="last-net" style="font-family:var(--mono);font-size:14px;font-weight:700;">+$0</div>
+      </div>
+
+      <div class="section-head">Location</div>
+      <div class="stat-row"><span class="lbl">Store</span><span class="val" id="loc-name-disp">—</span></div>
+      <div class="stat-row"><span class="lbl">Weekly Rent</span><span class="val" id="loc-rent-disp">—</span></div>
+      <div class="stat-row"><span class="lbl">Foot Traffic</span><span class="val" id="loc-traffic-disp">—</span></div>
+      <div id="rent-holiday-disp" class="rent-holiday-note" style="display:none;margin-bottom:6px;"></div>
+
+      <div class="section-head">Staffing</div>
+
+      <div class="crew-input-row">
+        <label for="inp-crew">Crew headcount</label>
+        <input type="number" id="inp-crew" min="1" max="80" value="8" onchange="handleCrewChange()">
+      </div>
+      <div class="crew-input-row">
+        <label for="inp-wage">Hourly wage ($)</label>
+        <input type="number" id="inp-wage" min="18" max="60" step="0.50" value="22" onchange="handleCrewChange()">
+      </div>
+
+      <div class="stat-row" style="margin-top:6px;"><span class="lbl">Suggested crew</span><span class="val mono" id="sugg-crew-disp">—</span></div>
+      <div class="stat-row"><span class="lbl">Throughput mult</span><span class="val mono" id="throughput-disp">1.00x</span></div>
+
+      <div style="margin-top:8px;margin-bottom:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-family:var(--sans);font-size:11px;color:var(--muted);">Crew morale</span>
+          <span class="mono" style="font-size:11px;font-weight:700;" id="morale-pct">100/100</span>
+        </div>
+        <div class="morale-bar-bg"><div class="morale-bar-fill" id="morale-fill" style="width:100%"></div></div>
+      </div>
+
+      <div id="op-state" style="font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;padding:3px 7px;border:1px solid var(--green);color:var(--green);display:inline-block;margin-top:4px;margin-bottom:12px;">NOMINAL</div>
+
+      <div class="section-head">Alerts</div>
+      <div id="alerts-container"></div>
+    </div>
+
+    <!-- ========================================================
+         CENTER COLUMN: INVENTORY + SOURCING + P&L
+         ======================================================== -->
+    <div class="col">
+
+      <!-- Header row -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div class="section-head" style="margin:0;border:none;">
+          Product Portfolio
+        </div>
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;">
+          <span id="sku-count">0</span> / <span id="sku-max">20</span> SKUs
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="filter-bar" id="filter-bar">
+        <button class="filter-btn active" data-filter="all"      onclick="setFilter('all')">All</button>
+        <button class="filter-btn"        data-filter="Frozen"   onclick="setFilter('Frozen')">Frozen</button>
+        <button class="filter-btn"        data-filter="Snacks"   onclick="setFilter('Snacks')">Snacks</button>
+        <button class="filter-btn"        data-filter="Produce"  onclick="setFilter('Produce')">Produce</button>
+        <button class="filter-btn"        data-filter="Dairy"    onclick="setFilter('Dairy')">Dairy</button>
+        <button class="filter-btn"        data-filter="Pantry"   onclick="setFilter('Pantry')">Pantry</button>
+        <button class="filter-btn"        data-filter="Beverages"onclick="setFilter('Beverages')">Beverages</button>
+        <button class="filter-btn"        data-filter="Seasonal" onclick="setFilter('Seasonal')">Seasonal</button>
+      </div>
+
+      <!-- Action bar -->
+      <div class="action-bar">
+        <button class="btn" id="btn-open-src" onclick="openSource()">+ Source Product</button>
+        <button class="btn" id="btn-close-src" onclick="closeSource()" style="display:none;">← Back to Inventory</button>
+        <button class="btn" onclick="doBulkSuggest()">Accept All Suggestions</button>
+      </div>
+
+      <!-- INVENTORY TABLE VIEW -->
+      <div id="inv-view">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="setSort('name')">Product</th>
+                <th onclick="setSort('price')">Price</th>
+                <th onclick="setSort('margin')">Margin</th>
+                <th>Sensitivity</th>
+                <th onclick="setSort('onHand')">On Hand</th>
+                <th>Order (sugg)</th>
+                <th onclick="setSort('sold')">Sold</th>
+                <th onclick="setSort('status')">Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="inv-tbody">
+              <tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-size:11px;">Loading inventory...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SOURCING PANEL -->
+      <div id="sourcing-panel" style="display:none;">
+        <p class="source-note">
+          Source fee is charged immediately. Product arrives next week. Seasonal items only available during their window.
+          <br><strong>Perishable</strong> items shown in italics — unsold units at week-end incur 20% waste cost.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Cost</th>
+                <th>Base Retail</th>
+                <th>Margin</th>
+                <th>Sensitivity</th>
+                <th>Notes</th>
+                <th>Fee</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="src-tbody">
+              <tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);font-size:11px;">Loading catalog...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- P&L -->
+      <div class="section-head" style="margin-top:20px;">This Week — P&amp;L</div>
+      <div id="pl-grid" class="pl-grid"></div>
+
+    </div>
+
+    <!-- ========================================================
+         RIGHT COLUMN: CHARTS + KPIs + LOG
+         ======================================================== -->
+    <div class="col">
+
+      <div class="section-head">Net Profit (Last 12 Weeks)</div>
+      <div class="chart-wrap">
+        <div id="chart-sparkline"></div>
+      </div>
+
+      <div class="section-head">Sales Velocity (Top 8)</div>
+      <div class="chart-wrap">
+        <div id="chart-velocity"></div>
+      </div>
+
+      <div class="section-head">Seasonal Demand Index</div>
+      <div class="chart-wrap">
+        <div id="chart-demand"></div>
+      </div>
+
+      <div class="section-head">KPIs</div>
+      <div id="kpi-container"></div>
+
+      <div class="section-head" style="margin-top:16px;">Event Log</div>
+      <div class="log-wrap" id="log-box"></div>
+
+    </div>
+  </div><!-- /game-grid -->
+
+</div><!-- /main-screen -->
+
+<!-- ============================================================
+     BANKRUPTCY OVERLAY
+     ============================================================ -->
+<div id="bankrupt-overlay">
+  <div style="max-width:400px;padding:40px;border:2px solid var(--accent);text-align:center;">
+    <h2>STORE CLOSED</h2>
+    <p>The cinnamon brooms remain unsold.<br>The crew has dispersed.</p>
+    <p style="margin-bottom:8px;">Cumulative profit: <strong id="bankrupt-profit" style="font-family:var(--mono);">$0</strong></p>
+    <button class="btn-accent" onclick="doBankruptRestart()" style="margin-top:16px;">Open a New Store</button>
+  </div>
+</div>
+
+<script src="game.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
