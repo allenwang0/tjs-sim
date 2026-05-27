@@ -1097,7 +1097,8 @@ function checkChallengeComplete() {
   if (!challenge) return false;
 
   // Check if week limit reached
-  if (challenge.weekLimit && S.week >= challenge.weekLimit && S.year === 1) {
+  const totalWeeksPlayed = (S.year - 1) * 52 + S.week;
+  if (challenge.weekLimit && totalWeeksPlayed >= challenge.weekLimit) {
     S.challengeComplete = true;
     log(`[CHALLENGE COMPLETE] ${challenge.name} finished! Final score: ${formatMoney(S.cumulativeProfit)}`);
     saveGame();
@@ -1165,6 +1166,9 @@ window.Game = {
   loadGame,
   saveGame,
   hardReset,
+  // New helpers
+  getProductStatus,
+  getTrustStatus,
   // Competitive mode
   startCompetitiveChallenge,
   checkChallengeComplete,

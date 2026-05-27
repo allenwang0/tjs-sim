@@ -113,12 +113,18 @@ function stopLoop() {
 }
 
 function tick() {
-  const result = Game.gameTick();
-  render();
-  if (result === 'bankrupt') {
+  try {
+    const result = Game.gameTick();
+    render();
+    if (result === 'bankrupt') {
+      stopLoop();
+      document.getElementById('bankrupt-overlay').classList.add('show');
+      document.getElementById('bankrupt-profit').textContent = Game.formatMoney(Game.S.cumulativeProfit, true);
+    }
+  } catch (error) {
+    console.error('Game tick error:', error);
     stopLoop();
-    document.getElementById('bankrupt-overlay').classList.add('show');
-    document.getElementById('bankrupt-profit').textContent = Game.formatMoney(Game.S.cumulativeProfit, true);
+    alert('An error occurred in the game simulation. The game has been paused. Check the console for details.');
   }
 }
 
@@ -248,6 +254,13 @@ function renderAlerts() {
   const wasteRate = S.cogsAccum > 0 ? S.wasteAccum / S.cogsAccum : 0;
   if (wasteRate > 0.08) alerts.push(`Waste rate ${(wasteRate*100).toFixed(1)}% — above 8% target.`);
   if (S.morale < 45) alerts.push(`Crew morale ${S.morale}%. Strike risk imminent.`);
+
+  // Trust penalty warning
+  const trustStatus = Game.getTrustStatus();
+  if (trustStatus.penalty) {
+    alerts.push(`⚠️ Price trust declining. Avg markup ${(trustStatus.avgMarkup * 100 - 100).toFixed(0)}% above retail baseline reducing demand.`);
+  }
+
   if (S.trend) {
     const cat = Game.getCat(S.trend.id);
     const stocked = !!S.inventory[S.trend.id];
@@ -306,18 +319,12 @@ function renderInventoryTable() {
       if (S.filter !== 'Seasonal' && cat.cat !== S.filter) continue;
     }
 
-    // Pending arrival?
-    const pending = inv.arrivalWk !== null && S.week < inv.arrivalWk;
+    // Get explicit status from helper
+    const status = Game.getProductStatus(id);
+    const pending = status === 'PENDING';
 
     const margin = inv.price > 0 ? ((inv.price - cat.cost) / inv.price * 100) : 0;
     const sugg = Game.suggestedOrder(id);
-
-    let status = 'STOCKED';
-    if (pending) status = 'PENDING';
-    else if (inv.onHand === 0) status = 'STOCKOUT';
-    else if (inv.onHand < inv.lastSold) status = 'LOW';
-    if (S.trend && S.trend.id === id && !pending) status = 'TRENDING';
-
     const sensLabel = Game.elasticityLabel(cat.elasticity);
 
     items.push({ id, inv, cat, margin, sugg, status, sensLabel });
@@ -350,7 +357,24 @@ function renderInventoryTable() {
                  : '';
 
     const pending = status === 'PENDING';
-    const onHandStr = pending ? '<span style="color:#4466cc;font-size:10px">ARRIVING WK ' + inv.arrivalWk + '</span>' : inv.onHand;
+
+    // Status icons and improved arrival display
+    const statusIcons = {
+      'TRENDING': '🔥',
+      'STOCKOUT': '❌',
+      'LOW': '⚠️',
+      'PENDING': '📦',
+      'STOCKED': '✓'
+    };
+    const statusIcon = statusIcons[status] || '';
+
+    // Better arrival display with weeks remaining
+    let onHandStr = inv.onHand;
+    if (pending) {
+      const weeksUntil = inv.arrivalWk - S.week;
+      onHandStr = `<span style="color:#4466cc;font-size:10px">Arriving in ${weeksUntil} week${weeksUntil > 1 ? 's' : ''}</span>`;
+    }
+
     const sensColor = sensLabel === 'INELASTIC' || sensLabel === 'LOW' ? 'var(--green)'
                     : sensLabel === 'NEUTRAL' ? 'var(--ink)'
                     : sensLabel === 'ELASTIC' ? 'var(--amber)'
@@ -373,12 +397,15 @@ function renderInventoryTable() {
       <td><span style="font-family:var(--mono);font-size:10px;color:${sensColor};font-weight:700;">${sensLabel}</span></td>
       <td style="font-weight:${inv.onHand < 10 ? '700' : '400'}">${onHandStr}</td>
       <td>
-        <input class="order-input" type="number" value="${inv.order}" min="0"
-          inputmode="numeric" onchange="handleOrder('${id}', this.value)">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input class="order-input" type="number" value="${inv.order}" min="0"
+            inputmode="numeric" onchange="handleOrder('${id}', this.value)">
+          <button class="btn-tiny" onclick="applySuggestion('${id}')" title="Apply suggested order">✓</button>
+        </div>
         <div style="font-size:9px;color:var(--muted);margin-top:1px;">sugg: ${sugg}</div>
       </td>
       <td>${inv.lastSold}</td>
-      <td><span class="status-badge ${status}">${status}</span></td>
+      <td><span class="status-badge ${status}">${statusIcon} ${status}</span></td>
       <td><button class="btn-link" onclick="doDiscontinue('${id}')">Drop</button></td>
     `;
     tbody.appendChild(tr);
@@ -397,7 +424,12 @@ function renderSourcingTable() {
   });
 
   if (available.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted);font-size:11px;">No products available to source this week.</td></tr>`;
+    // Determine why nothing is available
+    const allSourced = Game.CATALOG.every(c => S.inventory[c.id]);
+    const message = allSourced
+      ? 'All products sourced! You have the full catalog.'
+      : 'No seasonal products available this week. Check back during their window.';
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);font-size:11px;">${message}</td></tr>`;
     return;
   }
 
@@ -409,7 +441,32 @@ function renderSourcingTable() {
                     : sensLabel === 'NEUTRAL' ? 'var(--ink)'
                     : sensLabel === 'ELASTIC' ? 'var(--amber)'
                     : 'var(--accent)';
-    const windowNote = cat.limited ? `<div style="color:var(--accent);font-size:9px;font-weight:700;margin-top:2px;">Window: Wk ${cat.startWk}–${cat.endWk} (${Math.max(0, cat.endWk - S.week)} weeks left)</div>` : '';
+
+    // Urgency indicators for seasonal items
+    let windowNote = '';
+    let canSource = true;
+    if (cat.limited) {
+      const arrivalWk = S.week + 1;
+      const weeksLeft = cat.endWk - arrivalWk;
+      let urgencyColor = 'var(--green)';
+      let urgencyIcon = '✓';
+
+      if (arrivalWk >= cat.endWk) {
+        urgencyColor = 'var(--accent)';
+        urgencyIcon = '❌';
+        canSource = false;
+      } else if (weeksLeft <= 1) {
+        urgencyColor = 'var(--accent)';
+        urgencyIcon = '⚠️';
+        canSource = false; // Block 1 week or less
+      } else if (weeksLeft <= 2) {
+        urgencyColor = 'var(--amber)';
+        urgencyIcon = '⚠️';
+      }
+
+      windowNote = `<div style="color:${urgencyColor};font-size:9px;font-weight:700;margin-top:2px;">${urgencyIcon} Window: Wk ${cat.startWk}–${cat.endWk} (${weeksLeft} weeks after arrival)</div>`;
+    }
+
     const dataAnalystNote = S.prestigePerks.dataAnalyst ? `<div style="color:var(--green);font-size:9px;">Est. demand: ~${cat.baseDemand}/wk</div>` : '';
 
     const tr = document.createElement('tr');
@@ -428,7 +485,7 @@ function renderSourcingTable() {
         ${dataAnalystNote}
       </td>
       <td>$${fee}</td>
-      <td><button class="btn" onclick="doSource('${cat.id}')">Source</button></td>
+      <td><button class="btn" onclick="doSource('${cat.id}')" ${!canSource ? 'disabled title="Window closing too soon"' : ''}>Source</button></td>
     `;
     tbody.appendChild(tr);
   });
@@ -700,6 +757,12 @@ function doBulkSuggest() {
   render();
 }
 
+function applySuggestion(id) {
+  const sugg = Game.suggestedOrder(id);
+  Game.setOrder(id, sugg);
+  render();
+}
+
 function setFilter(f) {
   Game.S.filter = f;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
@@ -711,21 +774,36 @@ function setSort(col) {
   render();
 }
 
-function openSource() {
-  document.getElementById('inv-view').style.display = 'none';
-  document.getElementById('sourcing-panel').style.display = 'block';
-  document.getElementById('btn-open-src').style.display = 'none';
-  document.getElementById('btn-close-src').style.display = 'inline-block';
-  renderSourcingTable();
+// Tab switching for inventory/sourcing views
+function switchTab(tab) {
+  // Update tab button states
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  const invView = document.getElementById('inv-view');
+  const srcView = document.getElementById('sourcing-panel');
+  const filterBar = document.getElementById('filter-bar');
+  const actionBar = document.getElementById('action-bar');
+
+  if (tab === 'inventory') {
+    invView.style.display = 'block';
+    srcView.style.display = 'none';
+    filterBar.style.display = 'flex';
+    actionBar.style.display = 'flex';
+    render();
+  } else if (tab === 'sourcing') {
+    invView.style.display = 'none';
+    srcView.style.display = 'block';
+    filterBar.style.display = 'none';
+    actionBar.style.display = 'none';
+    renderSourcingTable();
+  }
 }
 
-function closeSource() {
-  document.getElementById('inv-view').style.display = 'block';
-  document.getElementById('sourcing-panel').style.display = 'none';
-  document.getElementById('btn-open-src').style.display = 'inline-block';
-  document.getElementById('btn-close-src').style.display = 'none';
-  render();
-}
+// Legacy functions for backwards compatibility
+function openSource() { switchTab('sourcing'); }
+function closeSource() { switchTab('inventory'); }
 
 let selectedPrestigeLocation = null;
 
@@ -736,7 +814,8 @@ function openPrestige() {
   const grid = document.getElementById('prestige-loc-grid');
   const carryEl = document.getElementById('prestige-carry-cash');
 
-  carryEl.textContent = `20% of cash (${Game.formatMoney(Game.S.cash * 0.20)})`;
+  const carryAmount = Math.max(0, Game.S.cash * 0.20);
+  carryEl.textContent = `20% of cash (${Game.formatMoney(carryAmount)})`;
 
   grid.innerHTML = '';
   selectedPrestigeLocation = Game.LOCATIONS[0].id;
@@ -932,8 +1011,9 @@ function highlightElement(selector) {
   const rect = el.getBoundingClientRect();
   const highlight = document.getElementById('tutorial-highlight-overlay');
 
-  highlight.style.left = rect.left - 4 + 'px';
-  highlight.style.top = rect.top - 4 + 'px';
+  // Account for scroll position
+  highlight.style.left = rect.left + window.scrollX - 4 + 'px';
+  highlight.style.top = rect.top + window.scrollY - 4 + 'px';
   highlight.style.width = rect.width + 8 + 'px';
   highlight.style.height = rect.height + 8 + 'px';
   highlight.classList.add('active');
@@ -954,11 +1034,37 @@ function doBankruptRestart() {
 function handleCrewChange() {
   const crew = parseInt(document.getElementById('inp-crew').value);
   const wage = parseFloat(document.getElementById('inp-wage').value);
-  if (!isNaN(crew) && crew >= 1) Game.S.crew = crew;
-  if (!isNaN(wage)) {
-    if (wage < 18) { alert('Minimum wage is $18/hr.'); document.getElementById('inp-wage').value = 18; Game.S.wage = 18; }
-    else Game.S.wage = wage;
+
+  // Validate crew count
+  if (!isNaN(crew)) {
+    if (crew < 1) {
+      alert('Minimum crew is 1.');
+      document.getElementById('inp-crew').value = 1;
+      Game.S.crew = 1;
+    } else if (crew > 80) {
+      alert('Maximum crew is 80.');
+      document.getElementById('inp-crew').value = 80;
+      Game.S.crew = 80;
+    } else {
+      Game.S.crew = crew;
+    }
   }
+
+  // Validate wage
+  if (!isNaN(wage)) {
+    if (wage < 18) {
+      alert('Minimum wage is $18/hr.');
+      document.getElementById('inp-wage').value = 18;
+      Game.S.wage = 18;
+    } else if (wage > 100) {
+      alert('Maximum wage is $100/hr (seriously?).');
+      document.getElementById('inp-wage').value = 100;
+      Game.S.wage = 100;
+    } else {
+      Game.S.wage = wage;
+    }
+  }
+
   Game.saveGame();
   render();
 }
@@ -1058,10 +1164,11 @@ document.addEventListener('keydown', (e) => {
 
   // Space: toggle pause
   if (e.code === 'Space') {
-    e.preventDefault();
+    e.preventDefault(); // Prevent page scroll
     if (document.getElementById('main-screen').style.display !== 'none') {
       togglePause();
     }
+    return; // Exit early to prevent other handlers
   }
 
   // 1, 2, 3: set speed
@@ -1076,11 +1183,11 @@ document.addEventListener('keydown', (e) => {
     }
   }
 
-  // S: toggle source panel
+  // S: toggle between tabs
   if (e.code === 'KeyS') {
     const invVisible = document.getElementById('inv-view').style.display !== 'none';
-    if (invVisible) openSource();
-    else closeSource();
+    if (invVisible) switchTab('sourcing');
+    else switchTab('inventory');
   }
 
   // L: toggle leaderboard
@@ -1168,6 +1275,12 @@ async function confirmSubmitScore() {
     return;
   }
 
+  // Check if Supabase is configured
+  if (!window.Supabase.client) {
+    alert('Leaderboard is not configured. Please check your Supabase configuration.');
+    return;
+  }
+
   const S = Game.S;
   const finalScore = Game.calculateFinalScore();
 
@@ -1239,6 +1352,12 @@ function closeLeaderboard() {
 async function loadLeaderboard(mode) {
   const container = document.getElementById('leaderboard-content');
   container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);">Loading leaderboard...</div>';
+
+  // Check if Supabase is configured
+  if (!window.Supabase.client) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--accent);">Leaderboard unavailable. Supabase not configured.</div>';
+    return;
+  }
 
   const scores = await window.Supabase.client.getLeaderboard(mode, 100);
 

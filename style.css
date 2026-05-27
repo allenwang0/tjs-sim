@@ -359,6 +359,41 @@ h1, h2, h3, h4 { font-family: var(--mono); font-weight: 700; letter-spacing: -0.
 .pl-row .pl-lbl { color: var(--muted); font-family: var(--sans); font-size: 10px; }
 .pl-row .pl-val { font-weight: 700; }
 
+/* ---- TABS ---- */
+
+.tab-nav {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border-bottom: 2px solid var(--border);
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: -2px;
+  touch-action: manipulation;
+  letter-spacing: 0.03em;
+}
+
+.tab-btn:hover {
+  color: var(--ink);
+  background: var(--light);
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
 /* ---- FILTERS / SORT ---- */
 
 .filter-bar {
@@ -441,6 +476,23 @@ h1, h2, h3, h4 { font-family: var(--mono); font-weight: 700; letter-spacing: -0.
 }
 
 .btn-accent:hover { opacity: 0.85; }
+
+.btn-tiny {
+  background: var(--light);
+  border: 1px solid var(--rule);
+  color: var(--green);
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+  font-weight: 700;
+}
+
+.btn-tiny:hover {
+  background: var(--green);
+  color: #fff;
+  border-color: var(--green);
+}
 
 /* ---- PRODUCT TABLE ---- */
 

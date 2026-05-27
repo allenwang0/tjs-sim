@@ -168,7 +168,13 @@
         </div>
       </div>
 
-      <!-- Filter bar -->
+      <!-- Tab Navigation -->
+      <div class="tab-nav">
+        <button class="tab-btn active" data-tab="inventory" onclick="switchTab('inventory')">Active Products</button>
+        <button class="tab-btn" data-tab="sourcing" onclick="switchTab('sourcing')">Available to Source</button>
+      </div>
+
+      <!-- Filter bar (shown only on inventory tab) -->
       <div class="filter-bar" id="filter-bar">
         <button class="filter-btn active" data-filter="all"      onclick="setFilter('all')">All</button>
         <button class="filter-btn"        data-filter="Frozen"   onclick="setFilter('Frozen')">Frozen</button>
@@ -180,10 +186,8 @@
         <button class="filter-btn"        data-filter="Seasonal" onclick="setFilter('Seasonal')">Seasonal</button>
       </div>
 
-      <!-- Action bar -->
-      <div class="action-bar">
-        <button class="btn" id="btn-open-src" onclick="openSource()">+ Source Product</button>
-        <button class="btn" id="btn-close-src" onclick="closeSource()" style="display:none;">← Back to Inventory</button>
+      <!-- Action bar (shown only on inventory tab) -->
+      <div class="action-bar" id="action-bar">
         <button class="btn" onclick="doBulkSuggest()">Accept All Suggestions</button>
       </div>
 
