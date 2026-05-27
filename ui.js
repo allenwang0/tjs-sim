@@ -87,8 +87,8 @@ function renderSetup() {
     Game.saveGame();
     showMain();
 
-    // Start tutorial for new games (skip if prestige or tutorial already dismissed/completed)
-    if (S.prestigeCount === 0 && !S.tutorial?.completed && !S.tutorial?.dismissed) {
+    // Start tutorial for new games (skip if prestige, competitive, or tutorial already dismissed/completed)
+    if (S.prestigeCount === 0 && !S.competitiveMode && !S.tutorial?.completed && !S.tutorial?.dismissed) {
       startTutorial();
     } else {
       startLoop();
@@ -114,8 +114,10 @@ function stopLoop() {
 
 function tick() {
   try {
+    console.log(`[TICK] Week ${Game.S.week}, Year ${Game.S.year} - Running game tick...`);
     const result = Game.gameTick();
     render();
+    console.log(`[TICK] Complete. New week: ${Game.S.week}, Cash: ${Game.S.cash}`);
     if (result === 'bankrupt') {
       stopLoop();
       document.getElementById('bankrupt-overlay').classList.add('show');
@@ -126,6 +128,16 @@ function tick() {
     stopLoop();
     alert('An error occurred in the game simulation. The game has been paused. Check the console for details.');
   }
+}
+
+// Add manual tick function for debugging
+function manualTick() {
+  if (!gameRunning) {
+    console.log('[MANUAL TICK] Game is paused. Starting loop first...');
+    startLoop();
+  }
+  console.log('[MANUAL TICK] Forcing immediate tick...');
+  tick();
 }
 
 function setSpeed(s) {
@@ -142,6 +154,13 @@ function setSpeed(s) {
 
 function render() {
   const S = Game.S;
+
+  // Safeguard: If we're in play mode and game should be running but isn't, restart it
+  if (S.gamePhase === 'play' && !S.tutorial?.active && !gameRunning) {
+    console.warn('[RENDER] Game should be running but isn\'t. Restarting loop...');
+    startLoop();
+  }
+
   renderHeader();
   renderLeftCol();
   renderCenterCol();
@@ -157,6 +176,18 @@ function renderHeader() {
   document.getElementById('hdr-loc').textContent = Game.getLoc().name;
   document.getElementById('hdr-week').textContent = `Yr ${S.year} Wk ${S.week}`;
   document.getElementById('hdr-season').textContent = S.season.toUpperCase();
+
+  // Update pause button text based on actual game state
+  const pauseBtn = document.getElementById('pause-btn');
+  if (pauseBtn) {
+    if (gameRunning) {
+      pauseBtn.textContent = '⏸ Pause';
+      pauseBtn.style.backgroundColor = '';
+    } else {
+      pauseBtn.textContent = '▶ Play (GAME PAUSED)';
+      pauseBtn.style.backgroundColor = 'var(--green)';
+    }
+  }
 
   const prestiBtn = document.getElementById('prestige-btn');
   prestiBtn.style.display = Game.prestigeEligible() && !S.competitiveMode ? 'inline-block' : 'none';
@@ -238,9 +269,17 @@ function renderLeftCol() {
   renderAlerts();
 
   // Autopilot indicator
+  // Autopilot section visibility (hide in competitive mode or during tutorial)
+  const apSection = document.getElementById('autopilot-section');
+  if (apSection) {
+    const shouldHideAutopilot = S.competitiveMode || S.tutorial?.active;
+    apSection.style.display = shouldHideAutopilot ? 'none' : 'block';
+  }
+
+  // Autopilot indicator (use class for proper transitions)
   const apIndicator = document.getElementById('autopilot-indicator');
   if (apIndicator) {
-    apIndicator.style.display = S.autopilot?.enabled ? 'block' : 'none';
+    apIndicator.classList.toggle('visible', S.autopilot?.enabled);
   }
 }
 
@@ -258,7 +297,10 @@ function renderAlerts() {
   // Trust penalty warning
   const trustStatus = Game.getTrustStatus();
   if (trustStatus.penalty) {
-    alerts.push(`⚠️ Price trust declining. Avg markup ${(trustStatus.avgMarkup * 100 - 100).toFixed(0)}% above retail baseline reducing demand.`);
+    // Calculate actual demand penalty being applied
+    const trustMod = Math.max(0.6, 1.0 - (trustStatus.avgMarkup - 1.25) * 0.8);
+    const demandReduction = ((1.0 - trustMod) * 100).toFixed(0);
+    alerts.push(`⚠️ PRICE TRUST PENALTY: ${demandReduction}% demand reduction active. Avg markup ${(trustStatus.avgMarkup * 100 - 100).toFixed(0)}% above baseline.`);
   }
 
   if (S.trend) {
@@ -287,12 +329,10 @@ function renderCenterCol() {
   document.getElementById('sku-count').textContent = Object.keys(S.inventory).length;
   document.getElementById('sku-max').textContent = S.skuLimit;
 
-  // View toggle
-  const invView = document.getElementById('inv-view');
-  const srcView = document.getElementById('sourcing-panel');
-  const isSourceMode = srcView.style.display !== 'none';
+  // View toggle - use state instead of DOM visibility for single source of truth
+  const currentTab = S.currentTab || 'inventory';
 
-  if (!isSourceMode) {
+  if (currentTab === 'inventory') {
     renderInventoryTable();
   } else {
     renderSourcingTable();
@@ -682,12 +722,18 @@ function renderKPIs() {
   const rentPct  = S.pl.revenue > 0 ? (S.pl.rent  / S.pl.revenue * 100).toFixed(1) : '0.0';
   const grossPct = S.pl.revenue > 0 ? (S.pl.gross / S.pl.revenue * 100).toFixed(1) : '0.0';
 
+  // Customer trust calculation
+  const trustStatus = Game.getTrustStatus();
+  const trustValue = trustStatus.healthy ? '✓ Healthy' : '⚠ Declining';
+  const trustClass = trustStatus.healthy ? 'num-pos' : 'num-neg';
+
   const kpis = [
     ['Cumulative Profit',   Game.formatMoney(S.cumulativeProfit, true), S.cumulativeProfit >= 0 ? 'num-pos' : 'num-neg'],
     ['Revenue / SKU Slot',  '$' + revPerSku.toLocaleString() + '/wk', ''],
     ['Gross Margin %',      grossPct + '%', parseFloat(grossPct) > 28 ? 'num-pos' : 'num-neg'],
     ['Waste / COGS',        wasteRate + '%', parseFloat(wasteRate) < 5 ? 'num-pos' : parseFloat(wasteRate) < 8 ? '' : 'num-neg'],
     ['Stockout Rate',       S.stockoutRatePct + '%', S.stockoutRatePct < 10 ? 'num-pos' : 'num-neg'],
+    ['Customer Trust',      trustValue, trustClass],
     ['Labor / Revenue',     laborPct + '%', parseFloat(laborPct) < 15 ? 'num-pos' : 'num-neg'],
     ['Rent / Revenue',      rentPct + '%',  parseFloat(rentPct)  < 25 ? 'num-pos' : 'num-neg'],
   ];
@@ -725,14 +771,28 @@ function renderLog() {
 function handlePrice(id, val) {
   const cat = Game.getCat(id);
   if (!cat) return;
-  if (!Game.setPrice(id, val)) {
-    alert('Price cannot be below cost price ($' + cat.cost.toFixed(2) + '). Margin floor enforced.');
+
+  const validation = Game.Validators.price(val, cat);
+  if (!validation.valid) {
+    alert('⚠️ Invalid Price\n\n' + validation.error);
+    render(); // Reset input to previous value
+    return;
   }
+
+  Game.setPrice(id, validation.value);
   render();
 }
 
 function handleOrder(id, val) {
-  Game.setOrder(id, val);
+  const validation = Game.Validators.order(val);
+  if (!validation.valid) {
+    alert('⚠️ Invalid Order Quantity\n\n' + validation.error);
+    render(); // Reset input to previous value
+    return;
+  }
+
+  Game.setOrder(id, validation.value);
+  // No render needed here - order changes don't affect display until next tick
 }
 
 function doSource(id) {
@@ -746,7 +806,17 @@ function doSource(id) {
 
 function doDiscontinue(id) {
   const cat = Game.getCat(id);
-  if (confirm(`Set [${cat ? cat.name : id}] adrift? Remaining inventory is written off.`)) {
+  const inv = Game.S.inventory[id];
+  const recoveryValue = inv && cat ? Math.round(inv.onHand * cat.cost * 0.50) : 0;
+
+  let message;
+  if (recoveryValue > 0) {
+    message = `Discontinue ${cat ? cat.name : id}?\n\nRemaining inventory (${inv.onHand} units) will be liquidated for ${Game.formatMoney(recoveryValue)} (50% recovery value).`;
+  } else {
+    message = `Discontinue ${cat ? cat.name : id}?\n\nThis will free up a SKU slot.`;
+  }
+
+  if (confirm(message)) {
     Game.discontinueProduct(id);
     render();
   }
@@ -776,6 +846,11 @@ function setSort(col) {
 
 // Tab switching for inventory/sourcing views
 function switchTab(tab) {
+  const S = Game.S;
+
+  // Save current tab to state (preserves filter/sort when switching back)
+  S.currentTab = tab;
+
   // Update tab button states
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
@@ -791,7 +866,7 @@ function switchTab(tab) {
     srcView.style.display = 'none';
     filterBar.style.display = 'flex';
     actionBar.style.display = 'flex';
-    render();
+    render(); // Re-renders with preserved filter/sort from state
   } else if (tab === 'sourcing') {
     invView.style.display = 'none';
     srcView.style.display = 'block';
@@ -800,10 +875,6 @@ function switchTab(tab) {
     renderSourcingTable();
   }
 }
-
-// Legacy functions for backwards compatibility
-function openSource() { switchTab('sourcing'); }
-function closeSource() { switchTab('inventory'); }
 
 let selectedPrestigeLocation = null;
 
@@ -870,6 +941,24 @@ function doHardReset() {
 
 function toggleAutopilot() {
   const S = Game.S;
+
+  // Ensure autopilot exists (should be handled by migration, but safety check)
+  if (!S.autopilot) {
+    console.error('[AUTOPILOT] Autopilot not initialized! Forcing save reload...');
+    alert('Autopilot not initialized. Please refresh the page.');
+    return;
+  }
+
+  // Prevent toggling autopilot in competitive mode or during tutorial
+  if (S.competitiveMode) {
+    Game.log('[AUTOPILOT] Autopilot not allowed in competitive mode.');
+    return;
+  }
+  if (S.tutorial?.active) {
+    Game.log('[AUTOPILOT] Autopilot disabled during tutorial.');
+    return;
+  }
+
   S.autopilot.enabled = !S.autopilot.enabled;
 
   const btn = document.getElementById('autopilot-toggle');
@@ -903,9 +992,10 @@ function startTutorial() {
     currentStep: 0,
     dismissed: false,
     pauseGame: true,
+    wasRunning: gameRunning  // Track previous game loop state
   };
 
-  // Pause game during tutorial
+  // Always stop loop during tutorial
   stopLoop();
 
   showTutorialStep(0);
@@ -976,7 +1066,7 @@ function completeTutorial() {
   document.getElementById('tutorial-overlay').classList.remove('show');
   clearHighlight();
 
-  // Resume game
+  // Always start game after completing tutorial
   startLoop();
 
   Game.log('[TUTORIAL] Tutorial completed. You are now in full control.');
@@ -987,13 +1077,16 @@ function completeTutorial() {
 function skipTutorial() {
   if (confirm('Skip the tutorial? You can always refer to the event log for tips.')) {
     const S = Game.S;
+    const wasRunning = S.tutorial?.wasRunning || false;
+
     S.tutorial.active = false;
     S.tutorial.dismissed = true;
 
     document.getElementById('tutorial-overlay').classList.remove('show');
     clearHighlight();
 
-    // Resume game
+    // Restore previous loop state (only start if it was running before)
+    // For new games, wasRunning is typically false, so we start the game
     startLoop();
 
     Game.saveGame();
@@ -1032,37 +1125,25 @@ function doBankruptRestart() {
 }
 
 function handleCrewChange() {
-  const crew = parseInt(document.getElementById('inp-crew').value);
-  const wage = parseFloat(document.getElementById('inp-wage').value);
+  const crewValue = document.getElementById('inp-crew').value;
+  const wageValue = document.getElementById('inp-wage').value;
 
   // Validate crew count
-  if (!isNaN(crew)) {
-    if (crew < 1) {
-      alert('Minimum crew is 1.');
-      document.getElementById('inp-crew').value = 1;
-      Game.S.crew = 1;
-    } else if (crew > 80) {
-      alert('Maximum crew is 80.');
-      document.getElementById('inp-crew').value = 80;
-      Game.S.crew = 80;
-    } else {
-      Game.S.crew = crew;
-    }
+  const crewValidation = Game.Validators.crew(crewValue);
+  if (!crewValidation.valid) {
+    alert('⚠️ Invalid Crew Count\n\n' + crewValidation.error);
+    document.getElementById('inp-crew').value = Game.S.crew;
+  } else {
+    Game.S.crew = crewValidation.value;
   }
 
   // Validate wage
-  if (!isNaN(wage)) {
-    if (wage < 18) {
-      alert('Minimum wage is $18/hr.');
-      document.getElementById('inp-wage').value = 18;
-      Game.S.wage = 18;
-    } else if (wage > 100) {
-      alert('Maximum wage is $100/hr (seriously?).');
-      document.getElementById('inp-wage').value = 100;
-      Game.S.wage = 100;
-    } else {
-      Game.S.wage = wage;
-    }
+  const wageValidation = Game.Validators.wage(wageValue);
+  if (!wageValidation.valid) {
+    alert('⚠️ Invalid Wage\n\n' + wageValidation.error);
+    document.getElementById('inp-wage').value = Game.S.wage;
+  } else {
+    Game.S.wage = wageValidation.value;
   }
 
   Game.saveGame();
@@ -1092,10 +1173,12 @@ function togglePause() {
     stopLoop();
     btn.textContent = '▶ Play';
     btn.style.backgroundColor = 'var(--green)';
+    console.log('[PAUSE] Game paused');
   } else {
     startLoop();
     btn.textContent = '⏸ Pause';
     btn.style.backgroundColor = '';
+    console.log('[PAUSE] Game resumed');
   }
 }
 
@@ -1144,6 +1227,9 @@ document.addEventListener('keydown', (e) => {
   // Ignore if typing in an input
   if (e.target.tagName === 'INPUT') return;
 
+  // Block all shortcuts during tutorial (tutorial is modal and should prevent all game actions)
+  if (Game.S.tutorial?.active) return;
+
   // ?: toggle help
   if (e.key === '?' || (e.shiftKey && e.code === 'Slash')) {
     e.preventDefault();
@@ -1156,9 +1242,8 @@ document.addEventListener('keydown', (e) => {
     closePrestige();
     const helpOverlay = document.getElementById('help-overlay');
     if (helpOverlay.style.display === 'flex') toggleHelp();
-    // Close source panel if open
-    const srcPanel = document.getElementById('sourcing-panel');
-    if (srcPanel && srcPanel.style.display !== 'none') closeSource();
+    // Close source panel if open (use state instead of DOM check)
+    if (Game.S.currentTab === 'sourcing') switchTab('inventory');
     return;
   }
 

@@ -691,7 +691,7 @@ tr.row-pending  { background: #f8f8ff; }
   position: fixed;
   inset: 0;
   background: rgba(255,255,255,0.95);
-  z-index: 999;
+  z-index: 1004; /* Highest priority - bankruptcy must be visible */
   align-items: center;
   justify-content: center;
   flex-direction: column;
@@ -1016,7 +1016,7 @@ tr.row-pending  { background: #f8f8ff; }
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.70);
-  z-index: 1000;
+  z-index: 1002; /* Above normal modals (1001) */
   align-items: center;
   justify-content: center;
   padding: 20px;
@@ -1031,7 +1031,7 @@ tr.row-pending  { background: #f8f8ff; }
   width: 100%;
   padding: 24px 28px;
   position: relative;
-  z-index: 1001;
+  z-index: 1003; /* Above tutorial overlay (1002) */
   box-shadow: 0 8px 24px rgba(0,0,0,0.3);
 }
 
@@ -1091,4 +1091,26 @@ tr.row-pending  { background: #f8f8ff; }
 
 #tutorial-highlight-overlay.active {
   display: block;
+}
+
+/* ============================================================
+   AUTOPILOT INDICATOR
+   ============================================================ */
+
+.autopilot-indicator {
+  display: none;
+  background: var(--green);
+  color: #fff;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 6px;
+  text-align: center;
+  transition: opacity 0.3s ease;
+}
+
+.autopilot-indicator.visible {
+  display: block;
+  opacity: 1;
 }

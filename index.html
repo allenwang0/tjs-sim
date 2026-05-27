@@ -74,6 +74,7 @@
       </span>
       <div class="speed-btns">
         <button class="btn" id="pause-btn" onclick="togglePause()" style="margin-right:12px;">⏸ Pause</button>
+        <button class="btn" onclick="manualTick()" style="margin-right:12px;background:var(--accent);color:#fff;" title="Force advance one week">⏭ Advance Week</button>
         <span style="color:var(--muted)">Speed:</span>
         <button class="speed-btn" data-speed="slow" onclick="setSpeed('slow')">Slow</button>
         <span>|</span>
@@ -139,17 +140,19 @@
       <div class="section-head">Alerts</div>
       <div id="alerts-container"></div>
 
-      <div class="section-head">Autopilot</div>
-      <div style="margin-bottom:12px;">
-        <button class="btn" id="autopilot-toggle" onclick="toggleAutopilot()">
-          <span id="autopilot-status">▶ Enable Autopilot</span>
-        </button>
-        <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;line-height:1.4;">
-          Auto-manages ordering, pricing, staffing, sourcing. Override anytime.
+      <div id="autopilot-section">
+        <div class="section-head">Autopilot</div>
+        <div style="margin-bottom:12px;">
+          <button class="btn" id="autopilot-toggle" onclick="toggleAutopilot()">
+            <span id="autopilot-status">▶ Enable Autopilot</span>
+          </button>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;line-height:1.4;">
+            Auto-manages ordering, pricing, staffing, sourcing. Override anytime.
+          </div>
         </div>
-      </div>
-      <div id="autopilot-indicator" style="display:none;background:var(--green);color:#fff;padding:6px 8px;font-family:var(--mono);font-size:10px;font-weight:700;margin-top:6px;text-align:center;">
-        ✓ AUTOPILOT ACTIVE
+        <div id="autopilot-indicator" class="autopilot-indicator">
+          ✓ AUTOPILOT ACTIVE
+        </div>
       </div>
     </div>
 
@@ -373,7 +376,16 @@
 <script>
   // Initialize Supabase on page load
   window.addEventListener('DOMContentLoaded', () => {
-    window.Supabase.init();
+    try {
+      if (window.Supabase && window.CONFIG?.SUPABASE) {
+        window.Supabase.init();
+      } else {
+        console.warn('Leaderboard features disabled: config.js not found or incomplete');
+      }
+    } catch (error) {
+      console.error('Failed to initialize Supabase:', error);
+      console.warn('Leaderboard features disabled due to initialization error');
+    }
   });
 </script>
 

@@ -260,9 +260,11 @@ const DEFAULT_STATE = () => ({
   markupHistory: [],       // last 4 weekly avg markup ratios
   filter: 'all',
   sort:   'status',
+  currentTab: 'inventory', // 'inventory' | 'sourcing'
   gamePhase: 'setup',      // 'setup' | 'play' | 'competitive'
   // Fan favorite badges persist across prestige
   fanFavorites: {},        // { [id]: boolean }
+  seasonalBadgesEarned: {}, // { [id_year]: boolean } - tracks badge per season per year
   prestigePerks: {
     loyalCrew: false,
     supplierDiscount: false,
@@ -298,6 +300,7 @@ const DEFAULT_STATE = () => ({
     currentStep: 0,
     dismissed: false,
     pauseGame: true,
+    wasRunning: false,
   },
 });
 
@@ -309,9 +312,36 @@ let S = DEFAULT_STATE();
 
 function saveGame() {
   try {
-    localStorage.setItem('tjs_sim_v3', JSON.stringify(S));
+    const data = JSON.stringify(S);
+
+    // Check size before saving (warn if > 4MB, most browsers support 5-10MB)
+    const sizeKB = new Blob([data]).size / 1024;
+    if (sizeKB > 4096) {
+      console.warn(`Save data large: ${sizeKB.toFixed(1)}KB`);
+      // Trim logs if too large
+      if (S.logs.length > 40) {
+        S.logs = S.logs.slice(0, 40);
+        return saveGame(); // Retry with smaller data
+      }
+    }
+
+    localStorage.setItem('tjs_sim_v3', data);
     if (window.showSaveIndicator) window.showSaveIndicator();
-  } catch(e) {}
+    return true;
+  } catch(e) {
+    console.error('Failed to save game:', e);
+
+    // Show user-visible error with recovery options
+    if (e.name === 'QuotaExceededError') {
+      alert('⚠️ Save failed: Storage quota exceeded.\n\nTry these solutions:\n1. Export your game data (top menu)\n2. Close other browser tabs\n3. Clear browser cache for this site\n4. Use a different browser');
+    } else if (e.name === 'SecurityError') {
+      alert('⚠️ Save failed: Browser security settings prevent saving.\n\nTry:\n1. Enable cookies/storage in browser settings\n2. Don\'t use Private/Incognito mode\n3. Export your game data as backup');
+    } else {
+      alert('⚠️ Save failed: ' + e.message + '\n\nYour progress may not be saved. Consider exporting your game data.');
+    }
+
+    return false;
+  }
 }
 
 function loadGame() {
@@ -320,12 +350,67 @@ function loadGame() {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && parsed.version === 3) {
-        S = parsed;
+        // Migrate old saves by merging with default state
+        S = migrateSave(parsed);
+        console.log('[LOAD] Game loaded successfully. Week:', S.week, 'Year:', S.year);
         return true;
       }
     }
-  } catch(e) {}
+  } catch(e) {
+    console.error('[LOAD] Failed to load game:', e);
+  }
   return false;
+}
+
+// Migrate old saves to include all new properties
+function migrateSave(oldSave) {
+  const defaultState = DEFAULT_STATE();
+  const migrated = { ...defaultState, ...oldSave };
+
+  // Ensure nested objects exist with all properties
+  migrated.autopilot = {
+    ...defaultState.autopilot,
+    ...(oldSave.autopilot || {})
+  };
+
+  migrated.autopilot.decisions = {
+    ...defaultState.autopilot.decisions,
+    ...(oldSave.autopilot?.decisions || {})
+  };
+
+  migrated.autopilot.config = {
+    ...defaultState.autopilot.config,
+    ...(oldSave.autopilot?.config || {})
+  };
+
+  migrated.prestigePerks = {
+    ...defaultState.prestigePerks,
+    ...(oldSave.prestigePerks || {})
+  };
+
+  migrated.tutorial = {
+    ...defaultState.tutorial,
+    ...(oldSave.tutorial || {})
+  };
+
+  migrated.pl = {
+    ...defaultState.pl,
+    ...(oldSave.pl || {})
+  };
+
+  // Ensure arrays exist
+  migrated.logs = oldSave.logs || [];
+  migrated.profitHistory = oldSave.profitHistory || [];
+  migrated.markupHistory = oldSave.markupHistory || [];
+
+  // Ensure objects exist
+  migrated.inventory = oldSave.inventory || {};
+  migrated.fanFavorites = oldSave.fanFavorites || {};
+  migrated.seasonalBadgesEarned = oldSave.seasonalBadgesEarned || {};
+
+  console.log('[MIGRATION] Save migrated. Autopilot:', migrated.autopilot?.enabled ? 'ENABLED' : 'DISABLED');
+
+  return migrated;
 }
 
 function hardReset() {
@@ -342,10 +427,14 @@ function getLoc()  { return LOCATIONS.find(l => l.id === S.locationId); }
 function getCat(id){ return CATALOG.find(c => c.id === id); }
 
 // Seeded RNG for competitive mode reproducibility
+// Using proper Linear Congruential Generator (LCG) with overflow handling
 function seededRandom() {
   if (!S.rngSeed) return Math.random();
-  S.rngState = (S.rngState * 1103515245 + 12345) & 0x7fffffff;
-  return S.rngState / 0x7fffffff;
+  const a = 1103515245;
+  const c = 12345;
+  const m = 0x80000000; // 2^31
+  S.rngState = (a * S.rngState + c) % m;
+  return S.rngState / m;
 }
 
 function getRandom() {
@@ -374,6 +463,7 @@ function suggestedCrew() {
   return Math.max(4, Math.round((loc.traffic * seasonTrafficMod()) / 200));
 }
 
+  // Reset to defaults (includes autopilot.enabled=false, tutorial state reset)
 function throughputMult() {
   const sc = suggestedCrew();
   let t = S.crew >= sc ? 1.0 : Math.max(0.5, S.crew / sc);
@@ -420,7 +510,8 @@ function doPrestige(newLocId) {
   const carryFanFaves = { ...S.fanFavorites };
   const carryPerks = { ...S.prestigePerks };
   const carryCount = S.prestigeCount + 1;
-  const carryCash = Math.max(75000, S.cash * 0.20);
+  // Carry 20% of cash with a minimum of $15k (not $75k - makes prestige more strategic)
+  const carryCash = Math.max(15000, Math.round(S.cash * 0.20));
 
   // Unlock perks per prestige count
   const newPerks = { ...carryPerks };
@@ -463,7 +554,7 @@ function seedStartingInventory() {
       demandDegradation: 1.0,
     };
   });
-  if (S.prestigePerks.loyalCrew) S.morale = Math.min(100, S.morale + 20);
+  if (S.prestigePerks?.\1) S.morale = Math.min(100, S.morale + 20);
   S.crew = suggestedCrew();
 }
 
@@ -504,21 +595,30 @@ function sourceProduct(id) {
   // Check if seasonal item's arrival would be within window
   if (cat.limited) {
     const arrivalWk = S.week + 1;
+
     if (arrivalWk < cat.startWk) {
       return { ok:false, msg:`${cat.name} window hasn't opened yet. Available weeks ${cat.startWk}-${cat.endWk}.` };
     }
-    // Block if arrival would be on or after last week (prevents immediate wipeout)
-    if (arrivalWk >= cat.endWk) {
-      return { ok:false, msg:`${cat.name} window closes week ${cat.endWk}. Too late to source (would arrive week ${arrivalWk}).` };
+
+    // Block if arrival is AFTER end week (product would immediately expire)
+    if (arrivalWk > cat.endWk) {
+      return { ok:false, msg:`${cat.name} window closed. Last order week was ${cat.endWk - 1}.` };
     }
-    // Warning if only 1-2 weeks left
-    const weeksLeft = cat.endWk - arrivalWk;
-    if (weeksLeft <= 2) {
-      const warning = `⚠️ Only ${weeksLeft} week${weeksLeft > 1 ? 's' : ''} left in window after arrival. High waste risk.`;
-      return { ok:false, msg:`${cat.name}: ${warning}`, warning: true };
+
+    // Calculate weeks left including arrival week
+    const weeksLeft = cat.endWk - arrivalWk + 1;
+
+    // Warning if only 1 week left (extremely high risk)
+    if (weeksLeft <= 1) {
+      return { ok:false, msg:`${cat.name}: Only ${weeksLeft} week left in window after arrival. Extremely high waste risk.`, warning: true };
+    }
+
+    // Advisory if 2-3 weeks (moderate risk)
+    if (weeksLeft <= 3) {
+      log(`[SOURCING] ${cat.name}: ${weeksLeft} weeks remaining in window. Order conservatively.`);
     }
   }
-  const fee = S.prestigePerks.supplierDiscount ? Math.round(cat.fee * 0.90) : cat.fee;
+  const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
   if (S.cash < fee) return { ok:false, msg:`Need ${formatMoney(fee)} for sourcing fee. Cash: ${formatMoney(S.cash)}.` };
   S.cash -= fee;
   S.inventory[id] = {
@@ -537,8 +637,22 @@ function sourceProduct(id) {
 
 function discontinueProduct(id) {
   const cat = getCat(id);
+  const inv = S.inventory[id];
+
+  // Calculate inventory liquidation value (50% recovery)
+  const writeOffValue = inv && cat ? Math.round(inv.onHand * cat.cost * 0.50) : 0;
+  if (writeOffValue > 0) {
+    S.cash += writeOffValue;
+  }
+
   delete S.inventory[id];
-  log(`[SKU DROP] ${cat ? cat.name : id} discontinued. Slot freed.`);
+
+  if (writeOffValue > 0) {
+    log(`[SKU DROP] ${cat ? cat.name : id} discontinued. Liquidated ${inv.onHand} units for ${formatMoney(writeOffValue)} (50% recovery).`);
+  } else {
+    log(`[SKU DROP] ${cat ? cat.name : id} discontinued. Slot freed.`);
+  }
+
   saveGame();
 }
 
@@ -636,8 +750,10 @@ function processTrendEngine() {
 // ============================================================
 
 function processAutopilot() {
+  // Safety check (migration should handle this)
+  if (!S.autopilot || !S.autopilot.enabled) return;
+
   const AP = S.autopilot;
-  if (!AP.enabled) return;
 
   // Decision 1: ORDERING (uses existing suggested order formula)
   if (AP.decisions.ordering) {
@@ -665,7 +781,7 @@ function processAutopilot() {
       if (!cat) continue;
 
       // Target 30% margin: price = cost / 0.7
-      const costAdj = S.prestigePerks.supplierDiscount ? 0.90 : 1.0;
+      const costAdj = S.prestigePerks?.supplierDiscount ? 0.90 : 1.0;
       const effectiveCost = cat.cost * costAdj;
       let targetPrice = effectiveCost / 0.70; // 30% margin
 
@@ -721,10 +837,20 @@ function autoSourceProducts(maxCount) {
     if (!S.inventory[id]) {
       const cat = getCat(id);
       if (cat && isSeasonalAvailable(cat)) {
+        const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+
+        // Check cash before attempting to source
+        if (S.cash < fee) {
+          log(`[AUTOPILOT] Insufficient cash for ${cat.name} (${formatMoney(fee)}). Stopping sourcing.`);
+          break;
+        }
+
         const result = sourceProduct(id);
         if (result.ok) {
           sourced++;
           log(`[AUTOPILOT] Auto-sourced ${cat.name} (Hall of Fame).`);
+        } else {
+          log(`[AUTOPILOT] Failed to source ${cat.name}: ${result.msg}`);
         }
       }
     }
@@ -736,10 +862,20 @@ function autoSourceProducts(maxCount) {
     if (!S.inventory[id]) {
       const cat = getCat(id);
       if (cat && isSeasonalAvailable(cat)) {
+        const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+
+        // Check cash before attempting to source
+        if (S.cash < fee) {
+          log(`[AUTOPILOT] Insufficient cash for ${cat.name} (${formatMoney(fee)}). Stopping sourcing.`);
+          break;
+        }
+
         const result = sourceProduct(id);
         if (result.ok) {
           sourced++;
           log(`[AUTOPILOT] Auto-sourced ${cat.name} (Strategic).`);
+        } else {
+          log(`[AUTOPILOT] Failed to source ${cat.name}: ${result.msg}`);
         }
       }
     }
@@ -760,10 +896,21 @@ function autoSourceProducts(maxCount) {
 
     for (const cat of seasonals) {
       if (sourced >= maxCount) break;
+
+      const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+
+      // Check cash before attempting to source
+      if (S.cash < fee) {
+        log(`[AUTOPILOT] Insufficient cash for ${cat.name} (${formatMoney(fee)}). Stopping sourcing.`);
+        break;
+      }
+
       const result = sourceProduct(cat.id);
       if (result.ok) {
         sourced++;
         log(`[AUTOPILOT] Auto-sourced ${cat.name} (Seasonal window).`);
+      } else {
+        log(`[AUTOPILOT] Failed to source ${cat.name}: ${result.msg}`);
       }
     }
   }
@@ -813,6 +960,10 @@ function gameTick() {
   let targetMorale = 100;
   targetMorale += (S.wage - 20) * 5;
   if (S.crew < sc) targetMorale -= (sc - S.crew) * 12;
+
+  // Bound targetMorale before applying weighted average
+  targetMorale = Math.max(0, Math.min(150, targetMorale));
+
   S.morale = Math.max(10, Math.min(100, Math.round(S.morale * 0.70 + targetMorale * 0.30)));
 
   // Turnover event
@@ -944,17 +1095,24 @@ function gameTick() {
       waste += inv.onHand * cat.cost * 0.005;
     }
 
-    // Fan favorite badge: if sold out 2+ weeks in window
+    // Fan favorite badge: if sold out during seasonal window
     if (cat.limited && inv.onHand === 0 && sold > 0) {
+      const badgeKey = `${id}_${S.year}`;
+
       if (!S.fanFavorites[id]) {
+        // First time earning this badge
         S.fanFavorites[id] = true;
+        S.seasonalBadgesEarned[badgeKey] = true;
         log(`[FAN FAVORITE] ${cat.name} earned a fan favorite badge. +20% demand next year.`);
+      } else if (!S.seasonalBadgesEarned[badgeKey]) {
+        // Already has badge from previous year, don't log again this year
+        S.seasonalBadgesEarned[badgeKey] = true;
       }
     }
 
     // Replenishment order (costs cash immediately)
     if (inWindow && inv.order > 0) {
-      const costAdj = S.prestigePerks.supplierDiscount ? 0.90 : 1.0;
+      const costAdj = S.prestigePerks?.\1 ? 0.90 : 1.0;
       const orderCost = inv.order * cat.cost * costAdj;
       const canAfford = Math.min(inv.order, Math.floor(S.cash / (cat.cost * costAdj)));
       if (canAfford > 0) {
@@ -997,8 +1155,8 @@ function gameTick() {
   // Seasonal transition / advance time
   advanceTime();
 
-  // Check if competitive challenge is complete
-  if (S.competitiveMode) {
+  // Check if competitive challenge is complete (skip if already complete)
+  if (S.competitiveMode && !S.challengeComplete) {
     checkChallengeComplete();
   }
 
@@ -1009,10 +1167,24 @@ function gameTick() {
   if (S.cash < 0) {
     const invValue = Object.keys(S.inventory).reduce((acc, id) => {
       const cat = getCat(id);
-      return acc + (S.inventory[id].onHand * (cat ? cat.cost : 0));
+      const inv = S.inventory[id];
+      if (!cat) return acc;
+
+      // Include on-hand inventory value
+      const onHandValue = inv.onHand * cat.cost;
+
+      // Include pending orders as assets (50% value since not yet received)
+      const pendingValue = (inv.arrivalWk && S.week < inv.arrivalWk)
+        ? inv.order * cat.cost * 0.5
+        : 0;
+
+      return acc + onHandValue + pendingValue;
     }, 0);
+
     const weeklyFixed = labor + rent;
-    if (S.cash < -25000 || invValue < weeklyFixed * 0.5) {
+    const bankruptcyThreshold = -25000;
+
+    if (S.cash < bankruptcyThreshold || invValue < weeklyFixed * 0.5) {
       log('[BANKRUPTCY] Store has closed. Cash depleted and inventory cannot cover fixed costs.');
       return 'bankrupt';
     }
@@ -1076,6 +1248,12 @@ function startCompetitiveChallenge(challengeId) {
   S.rngState = challenge.seed;
   S.challengeComplete = false;
 
+  // Explicitly disable autopilot and tutorial for fair competition
+  S.autopilot.enabled = false;
+  S.tutorial.dismissed = true;
+  S.tutorial.completed = false;
+  S.tutorial.active = false;
+
   seedStartingInventory();
   rollAnnualViral();
 
@@ -1135,6 +1313,45 @@ function log(msg) {
 }
 
 // ============================================================
+// INPUT VALIDATORS
+// ============================================================
+
+const Validators = {
+  price: (value, cat) => {
+    const n = parseFloat(value);
+    if (isNaN(n)) return { valid: false, error: 'Price must be a number' };
+    if (n < 0) return { valid: false, error: 'Price cannot be negative' };
+    if (n < cat.cost) return { valid: false, error: `Price cannot be below cost (${formatMoney(cat.cost)})` };
+    if (n > cat.cost * 5) return { valid: false, error: 'Price too high - customers would never buy (max 5x cost)' };
+    return { valid: true, value: parseFloat(n.toFixed(2)) };
+  },
+
+  order: (value) => {
+    const n = parseInt(value);
+    if (isNaN(n)) return { valid: false, error: 'Order quantity must be a number' };
+    if (n < 0) return { valid: false, error: 'Order quantity cannot be negative' };
+    if (n > 10000) return { valid: false, error: 'Order too large - maximum 10,000 units per order' };
+    return { valid: true, value: n };
+  },
+
+  crew: (value, maxCrew = 80) => {
+    const n = parseInt(value);
+    if (isNaN(n)) return { valid: false, error: 'Crew count must be a number' };
+    if (n < 1) return { valid: false, error: 'Must have at least 1 crew member' };
+    if (n > maxCrew) return { valid: false, error: `Maximum ${maxCrew} crew members` };
+    return { valid: true, value: n };
+  },
+
+  wage: (value) => {
+    const n = parseFloat(value);
+    if (isNaN(n)) return { valid: false, error: 'Wage must be a number' };
+    if (n < 18) return { valid: false, error: 'Minimum wage is $18/hr' };
+    if (n > 60) return { valid: false, error: 'Maximum wage is $60/hr' };
+    return { valid: true, value: parseFloat(n.toFixed(2)) };
+  }
+};
+
+// ============================================================
 // EXPORTS (accessed by ui.js via window.Game)
 // ============================================================
 
@@ -1173,4 +1390,6 @@ window.Game = {
   startCompetitiveChallenge,
   checkChallengeComplete,
   calculateFinalScore,
+  // Validators
+  Validators,
 };
