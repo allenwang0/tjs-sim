@@ -86,8 +86,14 @@ function renderSetup() {
     Game.log(`You inherited a small running store. Review your inventory and ordering before the next tick.`);
     Game.saveGame();
     showMain();
-    startLoop();
-    render();
+
+    // Start tutorial for new games (skip if prestige or tutorial already dismissed/completed)
+    if (S.prestigeCount === 0 && !S.tutorial?.completed && !S.tutorial?.dismissed) {
+      startTutorial();
+    } else {
+      startLoop();
+      render();
+    }
   };
 }
 
@@ -804,6 +810,138 @@ function toggleAutopilot() {
 
   Game.saveGame();
   render();
+}
+
+// ============================================================
+// TUTORIAL SYSTEM
+// ============================================================
+
+function startTutorial() {
+  const S = Game.S;
+  S.tutorial = {
+    active: true,
+    completed: false,
+    currentStep: 0,
+    dismissed: false,
+    pauseGame: true,
+  };
+
+  // Pause game during tutorial
+  stopLoop();
+
+  showTutorialStep(0);
+  document.getElementById('tutorial-overlay').classList.add('show');
+  Game.saveGame();
+}
+
+function showTutorialStep(stepIndex) {
+  const step = Game.TUTORIAL_STEPS[stepIndex];
+  const S = Game.S;
+
+  S.tutorial.currentStep = stepIndex;
+
+  // Update UI
+  document.getElementById('tutorial-step-num').textContent = stepIndex + 1;
+  document.getElementById('tutorial-step-total').textContent = Game.TUTORIAL_STEPS.length;
+  document.getElementById('tutorial-title').textContent = step.title;
+  document.getElementById('tutorial-content').textContent = step.content;
+
+  // Navigation buttons
+  const prevBtn = document.getElementById('tutorial-prev');
+  const nextBtn = document.getElementById('tutorial-next');
+
+  prevBtn.disabled = stepIndex === 0;
+
+  if (stepIndex === Game.TUTORIAL_STEPS.length - 1) {
+    nextBtn.textContent = 'Finish Tutorial';
+  } else {
+    nextBtn.textContent = 'Next →';
+  }
+
+  // Highlight element if specified
+  if (step.highlight) {
+    highlightElement(step.highlight);
+  } else {
+    clearHighlight();
+  }
+
+  Game.saveGame();
+}
+
+function nextTutorialStep() {
+  const S = Game.S;
+  const nextIndex = S.tutorial.currentStep + 1;
+
+  if (nextIndex >= Game.TUTORIAL_STEPS.length) {
+    // Tutorial complete
+    completeTutorial();
+  } else {
+    showTutorialStep(nextIndex);
+  }
+}
+
+function prevTutorialStep() {
+  const S = Game.S;
+  const prevIndex = S.tutorial.currentStep - 1;
+
+  if (prevIndex >= 0) {
+    showTutorialStep(prevIndex);
+  }
+}
+
+function completeTutorial() {
+  const S = Game.S;
+  S.tutorial.active = false;
+  S.tutorial.completed = true;
+
+  document.getElementById('tutorial-overlay').classList.remove('show');
+  clearHighlight();
+
+  // Resume game
+  startLoop();
+
+  Game.log('[TUTORIAL] Tutorial completed. You are now in full control.');
+  Game.saveGame();
+  render();
+}
+
+function skipTutorial() {
+  if (confirm('Skip the tutorial? You can always refer to the event log for tips.')) {
+    const S = Game.S;
+    S.tutorial.active = false;
+    S.tutorial.dismissed = true;
+
+    document.getElementById('tutorial-overlay').classList.remove('show');
+    clearHighlight();
+
+    // Resume game
+    startLoop();
+
+    Game.saveGame();
+    render();
+  }
+}
+
+function highlightElement(selector) {
+  const el = document.querySelector(selector);
+  if (!el) {
+    clearHighlight();
+    return;
+  }
+
+  const rect = el.getBoundingClientRect();
+  const highlight = document.getElementById('tutorial-highlight-overlay');
+
+  highlight.style.left = rect.left - 4 + 'px';
+  highlight.style.top = rect.top - 4 + 'px';
+  highlight.style.width = rect.width + 8 + 'px';
+  highlight.style.height = rect.height + 8 + 'px';
+  highlight.classList.add('active');
+}
+
+function clearHighlight() {
+  const highlight = document.getElementById('tutorial-highlight-overlay');
+  highlight.classList.remove('active');
 }
 
 function doBankruptRestart() {

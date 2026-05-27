@@ -471,6 +471,31 @@ function stockCount() {
   return Object.keys(S.inventory).length;
 }
 
+// Get explicit product status (single source of truth for UI)
+function getProductStatus(id) {
+  const inv = S.inventory[id];
+  if (!inv) return null;
+
+  const pending = inv.arrivalWk !== null && S.week < inv.arrivalWk;
+  if (pending) return 'PENDING';
+  if (S.trend && S.trend.id === id) return 'TRENDING';
+  if (inv.onHand === 0) return 'STOCKOUT';
+  if (inv.onHand < inv.lastSold) return 'LOW';
+  return 'STOCKED';
+}
+
+// Get trust penalty status
+function getTrustStatus() {
+  const avgMarkup = S.markupHistory.length > 0
+    ? S.markupHistory.reduce((a,b)=>a+b,0) / S.markupHistory.length
+    : 1.0;
+  return {
+    healthy: avgMarkup <= 1.25,
+    avgMarkup: avgMarkup,
+    penalty: avgMarkup > 1.25
+  };
+}
+
 function sourceProduct(id) {
   const cat = getCat(id);
   if (!cat) return { ok:false, msg:'Unknown product.' };
@@ -479,8 +504,18 @@ function sourceProduct(id) {
   // Check if seasonal item's arrival would be within window
   if (cat.limited) {
     const arrivalWk = S.week + 1;
-    if (arrivalWk < cat.startWk || arrivalWk > cat.endWk) {
-      return { ok:false, msg:`${cat.name} arrives week ${arrivalWk}, but window is weeks ${cat.startWk}-${cat.endWk}. Too late to source.` };
+    if (arrivalWk < cat.startWk) {
+      return { ok:false, msg:`${cat.name} window hasn't opened yet. Available weeks ${cat.startWk}-${cat.endWk}.` };
+    }
+    // Block if arrival would be on or after last week (prevents immediate wipeout)
+    if (arrivalWk >= cat.endWk) {
+      return { ok:false, msg:`${cat.name} window closes week ${cat.endWk}. Too late to source (would arrive week ${arrivalWk}).` };
+    }
+    // Warning if only 1-2 weeks left
+    const weeksLeft = cat.endWk - arrivalWk;
+    if (weeksLeft <= 2) {
+      const warning = `⚠️ Only ${weeksLeft} week${weeksLeft > 1 ? 's' : ''} left in window after arrival. High waste risk.`;
+      return { ok:false, msg:`${cat.name}: ${warning}`, warning: true };
     }
   }
   const fee = S.prestigePerks.supplierDiscount ? Math.round(cat.fee * 0.90) : cat.fee;
