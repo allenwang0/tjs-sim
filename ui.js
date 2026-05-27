@@ -781,6 +781,19 @@ function handleCrewChange() {
 }
 
 // ============================================================
+// SAVE INDICATOR
+// ============================================================
+
+window.showSaveIndicator = function() {
+  const indicator = document.getElementById('save-indicator');
+  if (!indicator) return;
+  indicator.style.opacity = '1';
+  setTimeout(() => {
+    indicator.style.opacity = '0';
+  }, 1500);
+};
+
+// ============================================================
 // PAUSE/PLAY & EXPORT
 // ============================================================
 

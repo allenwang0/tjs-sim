@@ -156,7 +156,10 @@ let S = DEFAULT_STATE();
 // ============================================================
 
 function saveGame() {
-  try { localStorage.setItem('tjs_sim_v3', JSON.stringify(S)); } catch(e) {}
+  try {
+    localStorage.setItem('tjs_sim_v3', JSON.stringify(S));
+    if (window.showSaveIndicator) window.showSaveIndicator();
+  } catch(e) {}
 }
 
 function loadGame() {
