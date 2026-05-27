@@ -4,8 +4,22 @@ This document tracks potential enhancements for the Trader Joe's Simulator.
 
 ## Recently Implemented ✅
 
+### Leaderboard System (Latest) 🎉
+- **Competitive Mode**: 3 standardized challenges with fixed RNG seeds for fair competition
+  - SF 52-Week Challenge (endurance test)
+  - NYC 26-Week Sprint (fast-paced)
+  - Houston Unlimited (survival mode)
+- **Sandbox Leaderboard**: Submit high scores from any sandbox game
+- **Supabase Integration**: Cloud-hosted global leaderboards
+- **Multiple Categories**: Separate rankings for each mode
+- **Score Submission**: Submit scores with player name
+- **Real-time Rankings**: View top 100 scores per category
+- **Keyboard Shortcut**: Press 'L' to open leaderboard anytime
+- **Seeded RNG**: Reproducible randomness for fair competitive play
+
+### Previous Features
 - **Pause/Play Control**: Toggle game with button or SPACE key
-- **Keyboard Shortcuts**: Full keyboard navigation (1/2/3 for speed, B for bulk accept, S for source toggle, ? for help)
+- **Keyboard Shortcuts**: Full keyboard navigation (1/2/3 for speed, B for bulk accept, S for source toggle, L for leaderboard, ? for help)
 - **Export Game Data**: Download save files as JSON
 - **Improved Prestige Modal**: Replaced prompt() with proper UI
 - **Help System**: In-game help modal with tips and shortcuts
@@ -62,7 +76,7 @@ This document tracks potential enhancements for the Trader Joe's Simulator.
 - [ ] **Seasonal Forecasting**: AI predictions for upcoming demand
 - [ ] **Waste Breakdown**: See which products contribute most to waste
 - [ ] **Customer Satisfaction Score**: Track customer sentiment over time
-- [ ] **Leaderboard**: Optional online leaderboard for high scores
+- [✅] **Leaderboard**: Optional online leaderboard for high scores (IMPLEMENTED!)
 
 ### Content Expansion
 - [ ] **More Locations**: Add 5-10 additional cities with unique characteristics

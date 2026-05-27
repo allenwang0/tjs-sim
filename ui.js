@@ -147,7 +147,19 @@ function renderHeader() {
   document.getElementById('hdr-season').textContent = S.season.toUpperCase();
 
   const prestiBtn = document.getElementById('prestige-btn');
-  prestiBtn.style.display = Game.prestigeEligible() ? 'inline-block' : 'none';
+  prestiBtn.style.display = Game.prestigeEligible() && !S.competitiveMode ? 'inline-block' : 'none';
+
+  // Show submit score button if challenge is complete or player can submit sandbox score
+  const submitBtn = document.getElementById('submit-score-btn');
+  if (S.competitiveMode && S.challengeComplete) {
+    submitBtn.style.display = 'inline-block';
+    submitBtn.classList.add('visible');
+  } else if (!S.competitiveMode && (S.cumulativeProfit > 100000 || S.cash > 200000)) {
+    // In sandbox mode, show submit button after significant progress
+    submitBtn.style.display = 'inline-block';
+  } else {
+    submitBtn.style.display = 'none';
+  }
 }
 
 // ============================================================
@@ -160,9 +172,9 @@ function renderLeftCol() {
 
   // Cash
   const cashEl = document.getElementById('cash-display');
-  cashEl.textContent = '$' + Math.abs(S.cash).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const absAmount = Math.abs(S.cash).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  cashEl.textContent = S.cash < 0 ? `-$${absAmount}` : `$${absAmount}`;
   cashEl.className = S.cash < 0 ? 'negative' : '';
-  if (S.cash < 0) cashEl.textContent = '-$' + Math.abs(S.cash).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
   const netEl = document.getElementById('last-net');
   const net = S.pl.net;
@@ -212,6 +224,12 @@ function renderLeftCol() {
 
   // Alerts
   renderAlerts();
+
+  // Autopilot indicator
+  const apIndicator = document.getElementById('autopilot-indicator');
+  if (apIndicator) {
+    apIndicator.style.display = S.autopilot?.enabled ? 'block' : 'none';
+  }
 }
 
 function renderAlerts() {
@@ -342,7 +360,7 @@ function renderInventoryTable() {
       </td>
       <td>
         <input class="price-input" type="number" step="0.01" value="${inv.price.toFixed(2)}"
-          min="${cat.cost}" onchange="handlePrice('${id}', this.value)">
+          min="${cat.cost}" inputmode="decimal" onchange="handlePrice('${id}', this.value)">
         <div style="font-size:9px;color:var(--muted);margin-top:1px;">min: $${cat.cost.toFixed(2)}</div>
       </td>
       <td style="font-weight:700;">${margin.toFixed(0)}%</td>
@@ -350,7 +368,7 @@ function renderInventoryTable() {
       <td style="font-weight:${inv.onHand < 10 ? '700' : '400'}">${onHandStr}</td>
       <td>
         <input class="order-input" type="number" value="${inv.order}" min="0"
-          onchange="handleOrder('${id}', this.value)">
+          inputmode="numeric" onchange="handleOrder('${id}', this.value)">
         <div style="font-size:9px;color:var(--muted);margin-top:1px;">sugg: ${sugg}</div>
       </td>
       <td>${inv.lastSold}</td>
@@ -385,7 +403,7 @@ function renderSourcingTable() {
                     : sensLabel === 'NEUTRAL' ? 'var(--ink)'
                     : sensLabel === 'ELASTIC' ? 'var(--amber)'
                     : 'var(--accent)';
-    const windowNote = cat.limited ? `<div style="color:var(--accent);font-size:9px;font-weight:700;margin-top:2px;">Window: Wk ${cat.startWk}–${cat.endWk}</div>` : '';
+    const windowNote = cat.limited ? `<div style="color:var(--accent);font-size:9px;font-weight:700;margin-top:2px;">Window: Wk ${cat.startWk}–${cat.endWk} (${Math.max(0, cat.endWk - S.week)} weeks left)</div>` : '';
     const dataAnalystNote = S.prestigePerks.dataAnalyst ? `<div style="color:var(--green);font-size:9px;">Est. demand: ~${cat.baseDemand}/wk</div>` : '';
 
     const tr = document.createElement('tr');
@@ -761,6 +779,33 @@ function doHardReset() {
   }
 }
 
+// ============================================================
+// AUTOPILOT CONTROLS
+// ============================================================
+
+function toggleAutopilot() {
+  const S = Game.S;
+  S.autopilot.enabled = !S.autopilot.enabled;
+
+  const btn = document.getElementById('autopilot-toggle');
+  const statusSpan = document.getElementById('autopilot-status');
+
+  if (S.autopilot.enabled) {
+    statusSpan.textContent = '⏸ Disable Autopilot';
+    btn.style.backgroundColor = 'var(--green)';
+    btn.style.color = '#fff';
+    Game.log('[AUTOPILOT] Autopilot ENABLED. All decisions automated.');
+  } else {
+    statusSpan.textContent = '▶ Enable Autopilot';
+    btn.style.backgroundColor = '';
+    btn.style.color = '';
+    Game.log('[AUTOPILOT] Autopilot DISABLED. Manual control resumed.');
+  }
+
+  Game.saveGame();
+  render();
+}
+
 function doBankruptRestart() {
   document.getElementById('bankrupt-overlay').classList.remove('show');
   stopLoop();
@@ -862,11 +907,14 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Escape: close modals
+  // Escape: close modals and panels
   if (e.code === 'Escape') {
     closePrestige();
     const helpOverlay = document.getElementById('help-overlay');
     if (helpOverlay.style.display === 'flex') toggleHelp();
+    // Close source panel if open
+    const srcPanel = document.getElementById('sourcing-panel');
+    if (srcPanel && srcPanel.style.display !== 'none') closeSource();
     return;
   }
 
@@ -896,4 +944,209 @@ document.addEventListener('keydown', (e) => {
     if (invVisible) openSource();
     else closeSource();
   }
+
+  // L: toggle leaderboard
+  if (e.code === 'KeyL') {
+    toggleLeaderboard();
+  }
 });
+
+// ============================================================
+// COMPETITIVE MODE & LEADERBOARD
+// ============================================================
+
+function showChallengeSelect() {
+  document.getElementById('setup-screen').style.display = 'none';
+  document.getElementById('main-screen').style.display = 'none';
+  document.getElementById('challenge-screen').style.display = 'flex';
+  renderChallengeSelect();
+}
+
+function renderChallengeSelect() {
+  const container = document.getElementById('challenge-grid');
+  container.innerHTML = '';
+
+  const challenges = window.CONFIG?.CHALLENGES || {};
+  Object.values(challenges).forEach(challenge => {
+    if (!challenge.enabled) return;
+
+    const card = document.createElement('div');
+    card.className = 'challenge-card';
+    card.innerHTML = `
+      <div class="challenge-name">${challenge.name}</div>
+      <div class="challenge-desc">${challenge.description}</div>
+      <div class="challenge-meta">
+        <div>Location: ${challenge.locationId.toUpperCase()}</div>
+        <div>Duration: ${challenge.weekLimit ? challenge.weekLimit + ' weeks' : 'Unlimited'}</div>
+        <div>Starting Cash: ${Game.formatMoney(challenge.startingCash)}</div>
+      </div>
+      <button class="btn-accent" onclick="startChallenge('${challenge.id}')">Start Challenge</button>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function startChallenge(challengeId) {
+  const result = Game.startCompetitiveChallenge(challengeId);
+  if (result.ok) {
+    document.getElementById('challenge-screen').style.display = 'none';
+    showMain();
+    startLoop();
+    render();
+  } else {
+    alert(result.msg);
+  }
+}
+
+function openSubmitScore() {
+  const S = Game.S;
+  const finalScore = Game.calculateFinalScore();
+
+  document.getElementById('submit-final-score').textContent = Game.formatMoney(finalScore);
+  document.getElementById('submit-weeks').textContent = `Week ${S.week}, Year ${S.year}`;
+  document.getElementById('submit-location').textContent = Game.getLoc().name;
+
+  const modeText = S.competitiveMode
+    ? (window.CONFIG?.CHALLENGES[S.challengeId]?.name || 'Competitive')
+    : 'Sandbox';
+  document.getElementById('submit-mode').textContent = modeText;
+
+  document.getElementById('submit-score-overlay').style.display = 'flex';
+}
+
+function closeSubmitScore() {
+  document.getElementById('submit-score-overlay').style.display = 'none';
+}
+
+async function confirmSubmitScore() {
+  const playerName = document.getElementById('player-name-input').value.trim();
+  if (!playerName) {
+    alert('Please enter your name');
+    return;
+  }
+
+  if (playerName.length > 50) {
+    alert('Name must be 50 characters or less');
+    return;
+  }
+
+  const S = Game.S;
+  const finalScore = Game.calculateFinalScore();
+
+  const mode = S.competitiveMode ? `competitive_${S.challengeId}` : 'sandbox';
+
+  const entry = {
+    player_name: playerName,
+    score: finalScore,
+    mode: mode,
+    location_id: S.locationId,
+    weeks_played: (S.year - 1) * 52 + S.week,
+    prestige_count: S.prestigeCount,
+    metadata: {
+      cash: S.cash,
+      cumulative_profit: S.cumulativeProfit,
+      year: S.year,
+      week: S.week,
+      challenge_id: S.challengeId,
+      challenge_complete: S.challengeComplete
+    }
+  };
+
+  // Show loading state
+  const btn = document.getElementById('confirm-submit-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'Submitting...';
+  btn.disabled = true;
+
+  const result = await window.Supabase.client.submitScore(entry);
+
+  btn.disabled = false;
+  btn.textContent = originalText;
+
+  if (result.success) {
+    alert('Score submitted successfully!');
+    closeSubmitScore();
+    // Open leaderboard to show the new score
+    openLeaderboard(mode);
+  } else {
+    alert('Failed to submit score: ' + (result.error || 'Unknown error'));
+  }
+}
+
+async function toggleLeaderboard() {
+  const overlay = document.getElementById('leaderboard-overlay');
+  if (overlay.style.display === 'flex') {
+    overlay.style.display = 'none';
+  } else {
+    await openLeaderboard('sandbox');
+  }
+}
+
+async function openLeaderboard(mode = 'sandbox') {
+  const overlay = document.getElementById('leaderboard-overlay');
+  overlay.style.display = 'flex';
+
+  // Set active tab
+  document.querySelectorAll('.leaderboard-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.mode === mode);
+  });
+
+  await loadLeaderboard(mode);
+}
+
+function closeLeaderboard() {
+  document.getElementById('leaderboard-overlay').style.display = 'none';
+}
+
+async function loadLeaderboard(mode) {
+  const container = document.getElementById('leaderboard-content');
+  container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);">Loading leaderboard...</div>';
+
+  const scores = await window.Supabase.client.getLeaderboard(mode, 100);
+
+  if (scores.length === 0) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);">No scores yet. Be the first!</div>';
+    return;
+  }
+
+  let html = '<table style="width:100%;font-family:var(--mono);font-size:11px;">';
+  html += '<thead><tr><th style="text-align:left;padding:8px;">Rank</th><th style="text-align:left;">Player</th><th style="text-align:right;">Score</th><th style="text-align:right;">Weeks</th><th style="text-align:left;">Location</th><th style="text-align:right;">Date</th></tr></thead>';
+  html += '<tbody>';
+
+  scores.forEach((entry, index) => {
+    const rank = index + 1;
+    const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '';
+    const date = new Date(entry.created_at).toLocaleDateString();
+    const location = entry.location_id ? entry.location_id.toUpperCase() : 'N/A';
+
+    html += `
+      <tr style="border-bottom:1px solid var(--rule);">
+        <td style="padding:8px;font-weight:700;">${medal} #${rank}</td>
+        <td style="padding:8px;">${escapeHtml(entry.player_name)}</td>
+        <td style="padding:8px;text-align:right;font-weight:700;color:var(--green);">${Game.formatMoney(entry.score)}</td>
+        <td style="padding:8px;text-align:right;">${entry.weeks_played || 'N/A'}</td>
+        <td style="padding:8px;">${location}</td>
+        <td style="padding:8px;text-align:right;color:var(--muted);font-size:10px;">${date}</td>
+      </tr>
+    `;
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function escapeHtml(unsafe) {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function switchLeaderboardTab(mode) {
+  document.querySelectorAll('.leaderboard-tab').forEach(tab => {
+    tab.classList.toggle('active', tab.dataset.mode === mode);
+  });
+  await loadLeaderboard(mode);
+}

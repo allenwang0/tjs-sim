@@ -102,8 +102,12 @@ Reach $500,000 cash or cumulative profit to unlock prestige mode:
 
 ### Running Locally
 1. Clone the repository
-2. Open `index.html` in any modern browser
-3. No server or build step required
+2. Copy `config.example.js` to `config.js`
+3. Fill in your Supabase credentials in `config.js` (optional - required for leaderboard features)
+4. Open `index.html` in any modern browser
+5. No server or build step required
+
+**Note**: The game works without Supabase configuration. Leaderboard features require valid credentials.
 
 ### Deployment
 Deploy as a static site to Vercel, Netlify, or GitHub Pages:

@@ -4,6 +4,12 @@
 # Claude Code
 .claude/
 
+# Configuration (sensitive)
+config.js
+config.local.js
+.env
+.env.*
+
 # OS files
 .DS_Store
 Thumbs.db

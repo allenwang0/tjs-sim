@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Supabase Connection Test</title>
+  <style>
+    body { font-family: monospace; padding: 40px; background: #1a1a1a; color: #fff; }
+    .status { padding: 10px; margin: 10px 0; border-radius: 4px; }
+    .success { background: #007a30; }
+    .error { background: #cc2200; }
+    button { padding: 10px 20px; margin: 10px 10px 10px 0; cursor: pointer; }
+    pre { background: #2a2a2a; padding: 15px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🧪 Supabase Connection Test</h1>
+  <p>This tests your leaderboard database connection.</p>
+
+  <button onclick="testConnection()">1. Test Connection</button>
+  <button onclick="testSubmit()">2. Submit Test Score</button>
+  <button onclick="testFetch()">3. Fetch Leaderboard</button>
+  <button onclick="clearResults()">Clear Results</button>
+
+  <div id="results"></div>
+
+  <script src="config.js"></script>
+  <script src="supabase-client.js"></script>
+  <script>
+    window.Supabase.init();
+
+    function log(message, type = 'info') {
+      const div = document.createElement('div');
+      div.className = `status ${type}`;
+      div.textContent = message;
+      document.getElementById('results').appendChild(div);
+    }
+
+    function logJson(obj) {
+      const pre = document.createElement('pre');
+      pre.textContent = JSON.stringify(obj, null, 2);
+      document.getElementById('results').appendChild(pre);
+    }
+
+    async function testConnection() {
+      log('Testing connection to Supabase...', 'info');
+      try {
+        const response = await fetch(
+          `${window.CONFIG.SUPABASE.url}/rest/v1/leaderboard?limit=1`,
+          {
+            headers: {
+              'apikey': window.CONFIG.SUPABASE.anonKey,
+              'Authorization': `Bearer ${window.CONFIG.SUPABASE.anonKey}`
+            }
+          }
+        );
+
+        if (response.ok) {
+          log('✅ Connection successful!', 'success');
+          const data = await response.json();
+          log(`Found ${data.length} record(s) in leaderboard table`, 'success');
+        } else {
+          const error = await response.text();
+          log(`❌ Connection failed: ${response.status} ${response.statusText}`, 'error');
+          logJson(error);
+        }
+      } catch (error) {
+        log(`❌ Connection error: ${error.message}`, 'error');
+      }
+    }
+
+    async function testSubmit() {
+      log('Submitting test score...', 'info');
+      const testScore = {
+        player_name: 'Test Player',
+        score: Math.floor(Math.random() * 100000),
+        mode: 'sandbox',
+        location_id: 'test',
+        weeks_played: 1,
+        prestige_count: 0,
+        metadata: { test: true }
+      };
+
+      logJson(testScore);
+
+      const result = await window.Supabase.client.submitScore(testScore);
+
+      if (result.success) {
+        log('✅ Score submitted successfully!', 'success');
+      } else {
+        log(`❌ Submit failed: ${result.error}`, 'error');
+      }
+    }
+
+    async function testFetch() {
+      log('Fetching leaderboard data...', 'info');
+      const scores = await window.Supabase.client.getLeaderboard('sandbox', 10);
+
+      if (scores && scores.length > 0) {
+        log(`✅ Fetched ${scores.length} scores`, 'success');
+        logJson(scores);
+      } else {
+        log('⚠️ No scores found (this is OK if you haven\'t submitted any yet)', 'info');
+      }
+    }
+
+    function clearResults() {
+      document.getElementById('results').innerHTML = '';
+    }
+
+    // Auto-test connection on load
+    window.addEventListener('load', () => {
+      setTimeout(testConnection, 500);
+    });
+  </script>
+</body>
+</html>
