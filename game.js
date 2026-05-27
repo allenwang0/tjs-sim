@@ -287,8 +287,6 @@ function seedStartingInventory() {
     const cat = getCat(seed.id);
     if (!cat) return;
     let price = cat.baseRetail;
-    // Apply supplier discount perk
-    const costAdj = S.prestigePerks.supplierDiscount ? 0.90 : 1.0;
     S.inventory[seed.id] = {
       onHand: seed.onHand,
       order: seed.order,
@@ -296,6 +294,7 @@ function seedStartingInventory() {
       consStockouts: 0,
       price: price,
       arrivalWk: null,
+      demandDegradation: 1.0,
     };
   });
   if (S.prestigePerks.loyalCrew) S.morale = Math.min(100, S.morale + 20);
@@ -321,6 +320,7 @@ function sourceProduct(id) {
     consStockouts: 0,
     price: cat.baseRetail,
     arrivalWk: S.week + 1,
+    demandDegradation: 1.0,
   };
   log(`[SOURCING] ${cat.name} contracted. Arrives week ${S.week + 1}. Fee: ${formatMoney(fee)}.`);
   saveGame();
@@ -379,6 +379,8 @@ function rollAnnualViral() {
   const pool = CATALOG.filter(c => c.trendSensitive);
   if (pool.length > 0) {
     S.annualViral = pool[Math.floor(Math.random() * pool.length)].id;
+  } else {
+    S.annualViral = null;
   }
 }
 
@@ -410,11 +412,13 @@ function processTrendEngine() {
   const trendFreq = 11;
   if (Math.random() < (1 / trendFreq)) {
     const pool = CATALOG.filter(c => c.trendSensitive || c.cat === 'Snacks' || c.cat === 'Frozen');
-    const chosen = pool[Math.floor(Math.random() * pool.length)];
-    S.trend = { id: chosen.id, mult: 2.5, weeksLeft: 5 };
-    // Schedule signal 2 weeks prior (already past, so just log now)
-    const cat = getCat(chosen.id);
-    log(`[TREND] Customers asking for ${cat.name} by name. Demand +150% for 3 weeks.`);
+    if (pool.length > 0) {
+      const chosen = pool[Math.floor(Math.random() * pool.length)];
+      S.trend = { id: chosen.id, mult: 2.5, weeksLeft: 5 };
+      // Schedule signal 2 weeks prior (already past, so just log now)
+      const cat = getCat(chosen.id);
+      log(`[TREND] Customers asking for ${cat.name} by name. Demand +150% for 5 weeks.`);
+    }
   }
 }
 
@@ -439,6 +443,9 @@ function computeTrustMod(id, playerPrice) {
 
 function gameTick() {
   const loc = getLoc();
+
+  // Update season BEFORE demand calculations
+  S.season = currentSeason();
 
   // Phase-based SKU limit
   if      (S.week >= 27) S.skuLimit = 40;
@@ -488,12 +495,11 @@ function gameTick() {
 
     // Check seasonal window
     const inWindow = isSeasonalAvailable(cat);
-    const windowJustClosed = cat.limited && S.week === cat.endWk + 1;
 
     // End-of-season auto-markdown for perishable seasonals on last week
     let effectivePrice = inv.price;
     if (cat.limited && cat.perishable && S.week === cat.endWk) {
-      effectivePrice = Math.max(cat.cost * 0.90, cat.cost); // markdown to near cost
+      effectivePrice = Math.min(cat.cost * 0.90, cat.cost); // markdown to near cost
       if (inv.onHand > 0) log(`[MARKDOWN] ${cat.name} end-of-season auto-marked down to ${formatMoney(effectivePrice)} to clear shelf.`);
     }
 
@@ -510,7 +516,7 @@ function gameTick() {
 
     // Demand calculation
     const seasonMult = cat.season[S.season] || 1.0;
-    const priceRatio = cat.baseRetail / effectivePrice;
+    const priceRatio = effectivePrice > 0 ? cat.baseRetail / effectivePrice : 1.0;
     const priceEffect = Math.min(3.0, Math.pow(Math.max(0.1, priceRatio), cat.elasticity));
     const collapseMult = effectivePrice > cat.cost * 3 ? 0.05 : 1.0;
     const footMult = (loc.traffic / 1600) * tp * seasonTrafficMod();
@@ -533,11 +539,14 @@ function gameTick() {
     // Trust modifier
     const trustMod = computeTrustMod(id, effectivePrice);
 
+    // Demand degradation from repeated stockouts
+    const degradationMult = inv.demandDegradation || 1.0;
+
     const noise = 0.85 + Math.random() * 0.30;
 
     const demand = Math.round(
       cat.baseDemand * seasonMult * priceEffect * collapseMult *
-      footMult * trendMult * urgencyMult * ffBonus * trustMod * noise
+      footMult * trendMult * urgencyMult * ffBonus * trustMod * degradationMult * noise
     );
 
     // Shrinkage
@@ -563,7 +572,7 @@ function gameTick() {
       stockouts++;
       inv.consStockouts++;
       if (S.degradationActive && inv.consStockouts >= 2) {
-        cat.baseDemand = Math.max(8, cat.baseDemand * 0.98);
+        inv.demandDegradation = Math.max(0.20, inv.demandDegradation * 0.98);
         if (inv.consStockouts === 2) log(`[BRAND DAMAGE] ${cat.name} repeated stockouts are eroding customer loyalty.`);
       }
       if (S.trend && S.trend.id === id) {

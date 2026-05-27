@@ -342,7 +342,8 @@ function renderInventoryTable() {
       </td>
       <td>
         <input class="price-input" type="number" step="0.01" value="${inv.price.toFixed(2)}"
-          onchange="handlePrice('${id}', this.value)">
+          min="${cat.cost}" onchange="handlePrice('${id}', this.value)">
+        <div style="font-size:9px;color:var(--muted);margin-top:1px;">min: $${cat.cost.toFixed(2)}</div>
       </td>
       <td style="font-weight:700;">${margin.toFixed(0)}%</td>
       <td><span style="font-family:var(--mono);font-size:10px;color:${sensColor};font-weight:700;">${sensLabel}</span></td>
@@ -641,8 +642,10 @@ function renderLog() {
 // ============================================================
 
 function handlePrice(id, val) {
+  const cat = Game.getCat(id);
+  if (!cat) return;
   if (!Game.setPrice(id, val)) {
-    alert('Price cannot be below cost price ($' + Game.getCat(id).cost.toFixed(2) + '). Margin floor enforced.');
+    alert('Price cannot be below cost price ($' + cat.cost.toFixed(2) + '). Margin floor enforced.');
   }
   render();
 }
@@ -700,15 +703,50 @@ function closeSource() {
   render();
 }
 
+let selectedPrestigeLocation = null;
+
 function openPrestige() {
   if (!Game.prestigeEligible()) return;
-  const choice = prompt(
-    `Open a new store?\n\nYou carry forward 20% of cash (${Game.formatMoney(Game.S.cash * 0.20)}).\nFan Favorite badges persist.\n\nEnter location ID to transfer to:\n${Game.LOCATIONS.map(l => l.id + ' — ' + l.name).join('\n')}`
-  );
-  if (!choice) return;
-  const loc = Game.LOCATIONS.find(l => l.id === choice.trim().toLowerCase());
-  if (!loc) { alert('Unknown location ID.'); return; }
-  Game.doPrestige(loc.id);
+
+  const overlay = document.getElementById('prestige-overlay');
+  const grid = document.getElementById('prestige-loc-grid');
+  const carryEl = document.getElementById('prestige-carry-cash');
+
+  carryEl.textContent = `20% of cash (${Game.formatMoney(Game.S.cash * 0.20)})`;
+
+  grid.innerHTML = '';
+  selectedPrestigeLocation = Game.LOCATIONS[0].id;
+
+  Game.LOCATIONS.forEach(loc => {
+    const card = document.createElement('div');
+    card.className = 'loc-card' + (selectedPrestigeLocation === loc.id ? ' selected' : '');
+    card.style.cursor = 'pointer';
+    card.innerHTML = `
+      <div class="loc-name">${loc.name}</div>
+      <div class="loc-meta">Traffic: ${loc.traffic.toLocaleString()}/wk | Comp: ${loc.comp}</div>
+      <div class="loc-rent">Rent: $${loc.rent.toLocaleString()}/wk</div>
+    `;
+    card.onclick = () => {
+      selectedPrestigeLocation = loc.id;
+      grid.querySelectorAll('.loc-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+    };
+    grid.appendChild(card);
+  });
+
+  overlay.style.display = 'flex';
+}
+
+function closePrestige() {
+  document.getElementById('prestige-overlay').style.display = 'none';
+  selectedPrestigeLocation = null;
+}
+
+function confirmPrestige() {
+  if (!selectedPrestigeLocation) return;
+
+  closePrestige();
+  Game.doPrestige(selectedPrestigeLocation);
   stopLoop();
   showMain();
   startLoop();
@@ -741,3 +779,108 @@ function handleCrewChange() {
   Game.saveGame();
   render();
 }
+
+// ============================================================
+// PAUSE/PLAY & EXPORT
+// ============================================================
+
+function togglePause() {
+  const btn = document.getElementById('pause-btn');
+  if (gameRunning) {
+    stopLoop();
+    btn.textContent = '▶ Play';
+    btn.style.backgroundColor = 'var(--green)';
+  } else {
+    startLoop();
+    btn.textContent = '⏸ Pause';
+    btn.style.backgroundColor = '';
+  }
+}
+
+function exportGameData() {
+  const data = {
+    exportDate: new Date().toISOString(),
+    gameState: Game.S,
+    summary: {
+      week: Game.S.week,
+      year: Game.S.year,
+      cash: Game.S.cash,
+      cumulativeProfit: Game.S.cumulativeProfit,
+      location: Game.getLoc().name,
+      skuCount: Object.keys(Game.S.inventory).length,
+      prestigeCount: Game.S.prestigeCount,
+    }
+  };
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tjs-sim-save-yr${Game.S.year}-wk${Game.S.week}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  Game.log('[EXPORT] Game data exported successfully.');
+}
+
+// ============================================================
+// HELP MODAL
+// ============================================================
+
+function toggleHelp() {
+  const overlay = document.getElementById('help-overlay');
+  overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
+}
+
+// ============================================================
+// KEYBOARD SHORTCUTS
+// ============================================================
+
+document.addEventListener('keydown', (e) => {
+  // Ignore if typing in an input
+  if (e.target.tagName === 'INPUT') return;
+
+  // ?: toggle help
+  if (e.key === '?' || (e.shiftKey && e.code === 'Slash')) {
+    e.preventDefault();
+    toggleHelp();
+    return;
+  }
+
+  // Escape: close modals
+  if (e.code === 'Escape') {
+    closePrestige();
+    const helpOverlay = document.getElementById('help-overlay');
+    if (helpOverlay.style.display === 'flex') toggleHelp();
+    return;
+  }
+
+  // Space: toggle pause
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (document.getElementById('main-screen').style.display !== 'none') {
+      togglePause();
+    }
+  }
+
+  // 1, 2, 3: set speed
+  if (e.code === 'Digit1') setSpeed('slow');
+  if (e.code === 'Digit2') setSpeed('normal');
+  if (e.code === 'Digit3') setSpeed('fast');
+
+  // B: bulk accept suggestions
+  if (e.code === 'KeyB') {
+    if (document.getElementById('inv-view').style.display !== 'none') {
+      doBulkSuggest();
+    }
+  }
+
+  // S: toggle source panel
+  if (e.code === 'KeyS') {
+    const invVisible = document.getElementById('inv-view').style.display !== 'none';
+    if (invVisible) openSource();
+    else closeSource();
+  }
+});

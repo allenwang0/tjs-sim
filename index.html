@@ -51,6 +51,7 @@
         &nbsp;<span id="hdr-week"></span>
       </span>
       <div class="speed-btns">
+        <button class="btn" id="pause-btn" onclick="togglePause()" style="margin-right:12px;">⏸ Pause</button>
         <span style="color:var(--muted)">Speed:</span>
         <button class="speed-btn" data-speed="slow" onclick="setSpeed('slow')">Slow</button>
         <span>|</span>
@@ -59,6 +60,8 @@
         <button class="speed-btn" data-speed="fast" onclick="setSpeed('fast')">Fast</button>
       </div>
       <button class="btn" id="prestige-btn" onclick="openPrestige()">New Store (Prestige)</button>
+      <button class="btn-link" onclick="exportGameData()">Export Data</button>
+      <button class="btn-link" onclick="toggleHelp()">Help (?)</button>
       <button class="btn-link" onclick="doHardReset()">Reset</button>
     </div>
   </div>
@@ -244,6 +247,83 @@
     <p>The cinnamon brooms remain unsold.<br>The crew has dispersed.</p>
     <p style="margin-bottom:8px;">Cumulative profit: <strong id="bankrupt-profit" style="font-family:var(--mono);">$0</strong></p>
     <button class="btn-accent" onclick="doBankruptRestart()" style="margin-top:16px;">Open a New Store</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     PRESTIGE MODAL
+     ============================================================ -->
+<div id="prestige-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
+  <div style="max-width:600px;padding:40px;border:2px solid var(--accent);background:var(--bg);text-align:left;">
+    <h2 style="margin-bottom:16px;">PRESTIGE — OPEN A NEW STORE</h2>
+    <div style="margin-bottom:20px;font-family:var(--sans);font-size:13px;line-height:1.6;">
+      <p>You've reached the prestige threshold. Open a new store and carry forward:</p>
+      <ul style="margin:12px 0;padding-left:20px;">
+        <li><strong id="prestige-carry-cash">20%</strong> of your current cash</li>
+        <li>All <strong>Fan Favorite</strong> badges (+20% demand)</li>
+        <li>Prestige perks unlock progressively</li>
+      </ul>
+    </div>
+
+    <div class="section-head" style="margin-bottom:8px;">Select New Location</div>
+    <div id="prestige-loc-grid" style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:20px;"></div>
+
+    <div style="display:flex;gap:12px;justify-content:flex-end;">
+      <button class="btn-link" onclick="closePrestige()">Cancel</button>
+      <button class="btn-accent" onclick="confirmPrestige()">Establish New Store</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     HELP MODAL
+     ============================================================ -->
+<div id="help-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
+  <div style="max-width:700px;max-height:80vh;overflow-y:auto;padding:40px;border:2px solid var(--accent);background:var(--bg);text-align:left;">
+    <h2 style="margin-bottom:16px;">KEYBOARD SHORTCUTS & TIPS</h2>
+
+    <div style="font-family:var(--sans);font-size:13px;line-height:1.6;">
+      <h3 style="margin-top:20px;color:var(--accent);">Keyboard Shortcuts</h3>
+      <table style="width:100%;margin:12px 0;font-family:var(--mono);font-size:11px;">
+        <tr><td style="padding:4px 0;"><strong>SPACE</strong></td><td>Pause/Play game</td></tr>
+        <tr><td style="padding:4px 0;"><strong>1, 2, 3</strong></td><td>Set speed (Slow, Normal, Fast)</td></tr>
+        <tr><td style="padding:4px 0;"><strong>B</strong></td><td>Bulk accept all order suggestions</td></tr>
+        <tr><td style="padding:4px 0;"><strong>S</strong></td><td>Toggle Source Product panel</td></tr>
+        <tr><td style="padding:4px 0;"><strong>?</strong></td><td>Show this help</td></tr>
+      </table>
+
+      <h3 style="margin-top:20px;color:var(--accent);">Strategy Tips</h3>
+      <ul style="margin:12px 0;padding-left:20px;list-style:disc;">
+        <li><strong>Seasonal items:</strong> Pre-order pumpkin and holiday items aggressively. They sell out fast.</li>
+        <li><strong>Perishables:</strong> Order conservatively. Unsold units incur 20% waste cost.</li>
+        <li><strong>Stockouts:</strong> After week 8, repeated stockouts permanently damage demand.</li>
+        <li><strong>Price elasticity:</strong> INELASTIC items can handle higher prices. ELASTIC items collapse if overpriced.</li>
+        <li><strong>Crew morale:</strong> Low morale reduces throughput. Pay well and staff appropriately.</li>
+        <li><strong>Trend signals:</strong> Watch for social media alerts 1-2 weeks before demand spikes.</li>
+        <li><strong>Fan Favorites:</strong> Sell out seasonal items to earn +20% demand next year.</li>
+      </ul>
+
+      <h3 style="margin-top:20px;color:var(--accent);">Game Phases</h3>
+      <ul style="margin:12px 0;padding-left:20px;list-style:disc;">
+        <li><strong>Week 1-8:</strong> Learning period. Stockouts don't permanently hurt demand.</li>
+        <li><strong>Week 13:</strong> 30 SKU slots unlock. Summer seasonal items available.</li>
+        <li><strong>Week 27:</strong> 40 SKU slots unlock. Fall/pumpkin season begins.</li>
+        <li><strong>Week 40:</strong> Winter holiday items available (Jingle Jangle!).</li>
+      </ul>
+
+      <h3 style="margin-top:20px;color:var(--accent);">KPI Targets</h3>
+      <ul style="margin:12px 0;padding-left:20px;list-style:disc;">
+        <li><strong>Gross Margin:</strong> Target 28%+ for healthy operations</li>
+        <li><strong>Waste/COGS:</strong> Keep below 8% by managing perishables carefully</li>
+        <li><strong>Stockout Rate:</strong> Keep below 10% to maintain demand</li>
+        <li><strong>Labor/Revenue:</strong> Target under 15% for efficiency</li>
+        <li><strong>Rent/Revenue:</strong> Target under 25% for profitability</li>
+      </ul>
+    </div>
+
+    <div style="display:flex;gap:12px;justify-content:center;margin-top:24px;">
+      <button class="btn-accent" onclick="toggleHelp()">Close</button>
+    </div>
   </div>
 </div>
 
