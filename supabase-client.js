@@ -103,15 +103,30 @@ class SupabaseClient {
 let supabaseClient = null;
 
 function initSupabase() {
-  if (window.CONFIG && window.CONFIG.SUPABASE) {
+  if (!window.CONFIG) {
+    console.warn('CONFIG not loaded. Leaderboard features disabled.');
+    return false;
+  }
+  if (!window.CONFIG.SUPABASE) {
+    console.warn('SUPABASE config missing. Leaderboard features disabled.');
+    return false;
+  }
+  if (!window.CONFIG.SUPABASE.url || !window.CONFIG.SUPABASE.anonKey) {
+    console.warn('SUPABASE config incomplete. Leaderboard features disabled.');
+    return false;
+  }
+
+  try {
     supabaseClient = new SupabaseClient(
       window.CONFIG.SUPABASE.url,
       window.CONFIG.SUPABASE.anonKey
     );
+    console.log('Supabase initialized successfully');
     return true;
+  } catch (error) {
+    console.error('Failed to create Supabase client:', error);
+    return false;
   }
-  console.warn('Supabase config not found');
-  return false;
 }
 
 window.Supabase = {

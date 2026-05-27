@@ -8,6 +8,131 @@ let tickMs = 8000;
 let gameRunning = false;
 
 // ============================================================
+// MODAL MANAGER - Unified modal handling system
+// ============================================================
+
+const ModalManager = {
+  current: null,
+  stack: [],
+
+  open(modalId, options = {}) {
+    const modal = document.getElementById(modalId);
+    if (!modal) {
+      console.error(`Modal not found: ${modalId}`);
+      return false;
+    }
+
+    // Close current modal if exists (unless stacking)
+    if (this.current && !options.stack) {
+      this.close();
+    }
+
+    // Store modal info
+    const modalInfo = {
+      id: modalId,
+      element: modal,
+      onClose: options.onClose || null,
+      closeOnEscape: options.closeOnEscape !== false, // Default true
+      closeOnBackdrop: options.closeOnBackdrop !== false // Default true
+    };
+
+    // If stacking, push current to stack
+    if (this.current && options.stack) {
+      this.stack.push(this.current);
+    }
+
+    this.current = modalInfo;
+
+    // Show modal
+    modal.style.display = 'flex';
+    modal.classList.add('modal-active');
+
+    // Add event listeners
+    if (modalInfo.closeOnEscape) {
+      document.addEventListener('keydown', this._handleEscape);
+    }
+
+    if (modalInfo.closeOnBackdrop) {
+      modal.addEventListener('click', this._handleBackdropClick);
+    }
+
+    // Pause game if modal should pause (e.g., help, prestige)
+    if (options.pauseGame && gameRunning) {
+      stopLoop();
+      modalInfo.gameWasPaused = false;
+    } else {
+      modalInfo.gameWasPaused = !gameRunning;
+    }
+
+    return true;
+  },
+
+  close() {
+    if (!this.current) return false;
+
+    const { element, onClose, gameWasPaused } = this.current;
+
+    // Hide modal
+    element.style.display = 'none';
+    element.classList.remove('modal-active');
+
+    // Remove event listeners
+    document.removeEventListener('keydown', this._handleEscape);
+    element.removeEventListener('click', this._handleBackdropClick);
+
+    // Resume game if it was running before
+    if (!gameWasPaused && !gameRunning) {
+      startLoop();
+    }
+
+    // Call onClose callback
+    if (onClose) {
+      onClose();
+    }
+
+    this.current = null;
+
+    // Restore stacked modal if exists
+    if (this.stack.length > 0) {
+      const previous = this.stack.pop();
+      this.current = previous;
+      previous.element.style.display = 'flex';
+    }
+
+    return true;
+  },
+
+  closeAll() {
+    while (this.current) {
+      this.close();
+    }
+    this.stack = [];
+  },
+
+  isOpen(modalId) {
+    if (!this.current) return false;
+    if (modalId) {
+      return this.current.id === modalId;
+    }
+    return true;
+  },
+
+  _handleEscape(e) {
+    if (e.key === 'Escape' && ModalManager.current && ModalManager.current.closeOnEscape) {
+      e.preventDefault();
+      ModalManager.close();
+    }
+  },
+
+  _handleBackdropClick(e) {
+    // Only close if clicking the modal backdrop itself, not its children
+    if (e.target === e.currentTarget && ModalManager.current && ModalManager.current.closeOnBackdrop) {
+      ModalManager.close();
+    }
+  }
+};
+
+// ============================================================
 // ENTRY POINT
 // ============================================================
 
@@ -615,8 +740,13 @@ function renderSparkline() {
   // Zero line
   const zeroY = H - ((0 - min) / range) * (H - 8) - 4;
 
+  // Accessibility: Create descriptive label
+  const trend = lastNet >= 0 ? 'positive' : 'negative';
+  const ariaLabel = `Net profit sparkline over last ${data.length} weeks. Current: ${Game.formatMoney(lastNet)}. Trend: ${trend}. Range: ${Game.formatMoney(min)} to ${Game.formatMoney(max)}.`;
+
   container.innerHTML = `
-    <svg width="${W}" height="${H}" style="display:block;">
+    <svg width="${W}" height="${H}" style="display:block;" role="img" aria-label="${ariaLabel}">
+      <title>Net Profit Sparkline</title>
       <line x1="0" y1="${zeroY}" x2="${W}" y2="${zeroY}" stroke="var(--rule)" stroke-dasharray="3,3"/>
       <polygon points="${fillPoly}" fill="${fill}"/>
       <polyline points="${polyline}" fill="none" stroke="${stroke}" stroke-width="1.5"/>
@@ -624,6 +754,7 @@ function renderSparkline() {
       <text x="2" y="10" font-size="8" font-family="monospace" fill="var(--muted)">+${Math.round(max).toLocaleString()}</text>
       <text x="2" y="${H-2}" font-size="8" font-family="monospace" fill="var(--muted)">${Math.round(min).toLocaleString()}</text>
     </svg>
+    <div class="sr-only">${ariaLabel}</div>
   `;
 }
 
@@ -653,18 +784,24 @@ function renderVelocityChart() {
   const barMaxW = W - labelW - 30;
   const maxSold = Math.max(...top.map(i => i.sold), 1);
 
-  let svg = `<svg width="${W}" height="${H}" style="display:block;">`;
+  // Accessibility: Create descriptive label
+  const topProducts = top.map(item => `${item.name}: ${item.sold} units`).join(', ');
+  const ariaLabel = `Top ${top.length} selling products this week. ${topProducts}.`;
+
+  let svg = `<svg width="${W}" height="${H}" style="display:block;" role="img" aria-label="${ariaLabel}">`;
+  svg += '<title>Top Selling Products</title>';
   top.forEach((item, i) => {
     const y = i * rowH + 12;
     const bw = Math.round((item.sold / maxSold) * barMaxW);
     const name = item.name.length > 18 ? item.name.substring(0,17) + '…' : item.name;
     svg += `
-      <text x="2" y="${y}" font-family="monospace" font-size="9" fill="var(--ink)">${name}</text>
+      <text x="2" y="${y}" font-family="monospace" font-size="9" fill="var(--ink)" title="${item.name}">${name}</text>
       <rect x="${labelW}" y="${y-9}" width="${bw}" height="9" fill="var(--ink)"/>
       <text x="${labelW + bw + 3}" y="${y}" font-family="monospace" font-size="9" font-weight="700" fill="var(--accent)">${item.sold}</text>
     `;
   });
   svg += '</svg>';
+  svg += `<div class="sr-only">${ariaLabel}</div>`;
   container.innerHTML = svg;
 }
 
@@ -697,7 +834,12 @@ function renderDemandCurveChart() {
   const curX = curIdx * segW;
   const curY = pts[curIdx][1];
 
-  let svg = `<svg width="${W}" height="${H}" style="display:block;">`;
+  // Accessibility: Create descriptive label
+  const seasonalData = seasons.map((s, i) => `${labels[i]}: ${(mults[i] * 100).toFixed(0)}% demand`).join(', ');
+  const ariaLabel = `Seasonal demand curve. Current season: ${S.season.toUpperCase()}. ${seasonalData}.`;
+
+  let svg = `<svg width="${W}" height="${H}" style="display:block;" role="img" aria-label="${ariaLabel}">`;
+  svg += '<title>Seasonal Demand Pattern</title>';
   svg += `<path d="${path}" fill="none" stroke="var(--rule)" stroke-width="1.5"/>`;
   seasons.forEach((s, i) => {
     const x = i * segW;
@@ -706,6 +848,7 @@ function renderDemandCurveChart() {
     svg += `<text x="${x - 8}" y="${H - 1}" font-size="8" font-family="monospace" fill="${isCur ? 'var(--accent)' : 'var(--muted)'}" font-weight="${isCur ? '700' : '400'}">${labels[i]}</text>`;
   });
   svg += '</svg>';
+  svg += `<div class="sr-only">${ariaLabel}</div>`;
   container.innerHTML = svg;
 }
 
@@ -881,7 +1024,6 @@ let selectedPrestigeLocation = null;
 function openPrestige() {
   if (!Game.prestigeEligible()) return;
 
-  const overlay = document.getElementById('prestige-overlay');
   const grid = document.getElementById('prestige-loc-grid');
   const carryEl = document.getElementById('prestige-carry-cash');
 
@@ -908,12 +1050,16 @@ function openPrestige() {
     grid.appendChild(card);
   });
 
-  overlay.style.display = 'flex';
+  ModalManager.open('prestige-overlay', {
+    pauseGame: true,
+    onClose: () => {
+      selectedPrestigeLocation = null;
+    }
+  });
 }
 
 function closePrestige() {
-  document.getElementById('prestige-overlay').style.display = 'none';
-  selectedPrestigeLocation = null;
+  ModalManager.close();
 }
 
 function confirmPrestige() {
@@ -1215,8 +1361,14 @@ function exportGameData() {
 // ============================================================
 
 function toggleHelp() {
-  const overlay = document.getElementById('help-overlay');
-  overlay.style.display = overlay.style.display === 'none' ? 'flex' : 'none';
+  if (ModalManager.isOpen('help-overlay')) {
+    ModalManager.close();
+  } else {
+    ModalManager.open('help-overlay', {
+      pauseGame: false, // Don't pause game for help
+      closeOnBackdrop: true
+    });
+  }
 }
 
 // ============================================================
@@ -1239,11 +1391,15 @@ document.addEventListener('keydown', (e) => {
 
   // Escape: close modals and panels
   if (e.code === 'Escape') {
-    closePrestige();
-    const helpOverlay = document.getElementById('help-overlay');
-    if (helpOverlay.style.display === 'flex') toggleHelp();
-    // Close source panel if open (use state instead of DOM check)
-    if (Game.S.currentTab === 'sourcing') switchTab('inventory');
+    // ModalManager handles modal closing automatically via its own handler
+    // Just handle non-modal closures here
+    if (!ModalManager.isOpen()) {
+      // Close source panel if open
+      const srcPanel = document.getElementById('sourcing-panel');
+      if (srcPanel && srcPanel.style.display !== 'none') {
+        switchTab('inventory');
+      }
+    }
     return;
   }
 
@@ -1341,11 +1497,14 @@ function openSubmitScore() {
     : 'Sandbox';
   document.getElementById('submit-mode').textContent = modeText;
 
-  document.getElementById('submit-score-overlay').style.display = 'flex';
+  ModalManager.open('submit-score-overlay', {
+    pauseGame: true,
+    closeOnBackdrop: false // Prevent accidental closes during submission
+  });
 }
 
 function closeSubmitScore() {
-  document.getElementById('submit-score-overlay').style.display = 'none';
+  ModalManager.close();
 }
 
 async function confirmSubmitScore() {
@@ -1410,28 +1569,29 @@ async function confirmSubmitScore() {
 }
 
 async function toggleLeaderboard() {
-  const overlay = document.getElementById('leaderboard-overlay');
-  if (overlay.style.display === 'flex') {
-    overlay.style.display = 'none';
+  if (ModalManager.isOpen('leaderboard-overlay')) {
+    ModalManager.close();
   } else {
     await openLeaderboard('sandbox');
   }
 }
 
 async function openLeaderboard(mode = 'sandbox') {
-  const overlay = document.getElementById('leaderboard-overlay');
-  overlay.style.display = 'flex';
-
   // Set active tab
   document.querySelectorAll('.leaderboard-tab').forEach(tab => {
     tab.classList.toggle('active', tab.dataset.mode === mode);
+  });
+
+  ModalManager.open('leaderboard-overlay', {
+    pauseGame: false, // Don't pause game for leaderboard viewing
+    closeOnBackdrop: true
   });
 
   await loadLeaderboard(mode);
 }
 
 function closeLeaderboard() {
-  document.getElementById('leaderboard-overlay').style.display = 'none';
+  ModalManager.close();
 }
 
 async function loadLeaderboard(mode) {

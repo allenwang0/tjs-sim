@@ -554,7 +554,7 @@ function seedStartingInventory() {
       demandDegradation: 1.0,
     };
   });
-  if (S.prestigePerks?.\1) S.morale = Math.min(100, S.morale + 20);
+  if (S.prestigePerks?.loyalCrew) S.morale = Math.min(100, S.morale + 20);
   S.crew = suggestedCrew();
 }
 
@@ -618,7 +618,7 @@ function sourceProduct(id) {
       log(`[SOURCING] ${cat.name}: ${weeksLeft} weeks remaining in window. Order conservatively.`);
     }
   }
-  const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+  const fee = S.prestigePerks?.supplierDiscount ? Math.round(cat.fee * 0.90) : cat.fee;
   if (S.cash < fee) return { ok:false, msg:`Need ${formatMoney(fee)} for sourcing fee. Cash: ${formatMoney(S.cash)}.` };
   S.cash -= fee;
   S.inventory[id] = {
@@ -837,7 +837,7 @@ function autoSourceProducts(maxCount) {
     if (!S.inventory[id]) {
       const cat = getCat(id);
       if (cat && isSeasonalAvailable(cat)) {
-        const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+        const fee = S.prestigePerks?.supplierDiscount ? Math.round(cat.fee * 0.90) : cat.fee;
 
         // Check cash before attempting to source
         if (S.cash < fee) {
@@ -862,7 +862,7 @@ function autoSourceProducts(maxCount) {
     if (!S.inventory[id]) {
       const cat = getCat(id);
       if (cat && isSeasonalAvailable(cat)) {
-        const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+        const fee = S.prestigePerks?.supplierDiscount ? Math.round(cat.fee * 0.90) : cat.fee;
 
         // Check cash before attempting to source
         if (S.cash < fee) {
@@ -897,7 +897,7 @@ function autoSourceProducts(maxCount) {
     for (const cat of seasonals) {
       if (sourced >= maxCount) break;
 
-      const fee = S.prestigePerks?.\1 ? Math.round(cat.fee * 0.90) : cat.fee;
+      const fee = S.prestigePerks?.supplierDiscount ? Math.round(cat.fee * 0.90) : cat.fee;
 
       // Check cash before attempting to source
       if (S.cash < fee) {
@@ -1112,7 +1112,7 @@ function gameTick() {
 
     // Replenishment order (costs cash immediately)
     if (inWindow && inv.order > 0) {
-      const costAdj = S.prestigePerks?.\1 ? 0.90 : 1.0;
+      const costAdj = S.prestigePerks?.supplierDiscount ? 0.90 : 1.0;
       const orderCost = inv.order * cat.cost * costAdj;
       const canAfford = Math.min(inv.order, Math.floor(S.cash / (cat.cost * costAdj)));
       if (canAfford > 0) {
