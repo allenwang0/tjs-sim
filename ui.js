@@ -7,6 +7,109 @@ let tickId = null;
 let tickMs = 8000;
 let gameRunning = false;
 
+// Table rendering optimization - state tracking
+let lastInventoryState = {};
+let lastRenderFilter = 'all';
+let lastRenderSort = 'status';
+
+// ============================================================
+// UI/UX IMPROVEMENTS - New helper functions
+// ============================================================
+
+// Confirmation Modal System
+let pendingConfirmAction = null;
+
+function showConfirm(message, onConfirm, title = 'CONFIRM ACTION') {
+  document.getElementById('confirm-modal-title').textContent = title;
+  document.getElementById('confirm-modal-message').textContent = message;
+  document.getElementById('confirm-modal').style.display = 'flex';
+  pendingConfirmAction = onConfirm;
+}
+
+function hideConfirm() {
+  document.getElementById('confirm-modal').style.display = 'none';
+  pendingConfirmAction = null;
+}
+
+// Input Validation Feedback
+function showInputError(inputElement, message) {
+  clearInputFeedback(inputElement);
+  inputElement.classList.add('input-error');
+
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'input-error-msg';
+  errorDiv.textContent = message;
+  errorDiv.id = `${inputElement.id || 'input'}-error`;
+
+  inputElement.parentNode.insertBefore(errorDiv, inputElement.nextSibling);
+  setTimeout(() => clearInputFeedback(inputElement), 4000);
+}
+
+function showInputSuccess(inputElement) {
+  clearInputFeedback(inputElement);
+  inputElement.classList.add('input-success');
+  setTimeout(() => inputElement.classList.remove('input-success'), 800);
+}
+
+function clearInputFeedback(inputElement) {
+  inputElement.classList.remove('input-error', 'input-success');
+  const errorMsg = document.getElementById(`${inputElement.id || 'input'}-error`);
+  if (errorMsg) errorMsg.remove();
+}
+
+// Keyboard Table Navigation
+let currentTableRow = null;
+
+function initTableKeyboardNav() {
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    const tbody = document.getElementById('inv-tbody');
+    if (!tbody) return;
+
+    const rows = Array.from(tbody.querySelectorAll('tr:not(.empty-state)'));
+    if (rows.length === 0) return;
+
+    if (!currentTableRow && (e.code === 'ArrowDown' || e.code === 'ArrowUp')) {
+      currentTableRow = rows[0];
+      highlightTableRow(currentTableRow);
+      e.preventDefault();
+      return;
+    }
+
+    if (!currentTableRow) return;
+    const currentIndex = rows.indexOf(currentTableRow);
+
+    if (e.code === 'ArrowDown' && currentIndex < rows.length - 1) {
+      e.preventDefault();
+      currentTableRow = rows[currentIndex + 1];
+      highlightTableRow(currentTableRow);
+      currentTableRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else if (e.code === 'ArrowUp' && currentIndex > 0) {
+      e.preventDefault();
+      currentTableRow = rows[currentIndex - 1];
+      highlightTableRow(currentTableRow);
+      currentTableRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else if (e.code === 'Enter') {
+      e.preventDefault();
+      const firstInput = currentTableRow.querySelector('input');
+      if (firstInput) firstInput.focus();
+    } else if (e.code === 'Escape') {
+      clearTableHighlight();
+    }
+  });
+}
+
+function highlightTableRow(row) {
+  document.querySelectorAll('tr.keyboard-focus').forEach(r => r.classList.remove('keyboard-focus'));
+  row.classList.add('keyboard-focus');
+}
+
+function clearTableHighlight() {
+  currentTableRow = null;
+  document.querySelectorAll('tr.keyboard-focus').forEach(r => r.classList.remove('keyboard-focus'));
+}
+
 // ============================================================
 // MODAL MANAGER - Unified modal handling system
 // ============================================================
@@ -145,6 +248,32 @@ window.addEventListener('DOMContentLoaded', () => {
   } else {
     showSetup();
   }
+
+  // Initialize confirmation modal
+  const confirmCancel = document.getElementById('confirm-cancel');
+  const confirmOk = document.getElementById('confirm-ok');
+  if (confirmCancel) confirmCancel.onclick = hideConfirm;
+  if (confirmOk) {
+    confirmOk.onclick = () => {
+      if (pendingConfirmAction) pendingConfirmAction();
+      hideConfirm();
+    };
+  }
+
+  // Initialize keyboard navigation
+  initTableKeyboardNav();
+
+  // Initialize table scroll detection for mobile
+  const tableWrap = document.querySelector('.table-wrap');
+  if (tableWrap) {
+    tableWrap.addEventListener('scroll', () => {
+      if (tableWrap.scrollLeft > 20) {
+        tableWrap.classList.add('scrolled');
+      } else {
+        tableWrap.classList.remove('scrolled');
+      }
+    });
+  }
 });
 
 // ============================================================
@@ -227,9 +356,33 @@ function renderSetup() {
 // ============================================================
 
 function startLoop() {
-  if (tickId) clearInterval(tickId);
+  // Prevent duplicate intervals
+  if (gameRunning && tickId) {
+    console.warn('[LOOP] Already running (tickId:', tickId, '). Ignoring duplicate startLoop() call.');
+    return;
+  }
+
+  // Clear any existing interval
+  if (tickId) {
+    console.log('[LOOP] Clearing existing interval:', tickId);
+    clearInterval(tickId);
+    tickId = null;
+  }
+
+  console.log('[LOOP] Starting game loop. Tick interval:', tickMs, 'ms. Week:', Game.S.week);
   tickId = setInterval(tick, tickMs);
   gameRunning = true;
+
+  // Update pause button UI
+  const pauseBtn = document.getElementById('pause-btn');
+  if (pauseBtn) {
+    pauseBtn.textContent = '⏸ Pause';
+    pauseBtn.style.backgroundColor = '';
+  }
+
+  // Hide pause overlay
+  const overlay = document.getElementById('pause-overlay');
+  if (overlay) overlay.style.display = 'none';
 }
 
 function stopLoop() {
@@ -269,7 +422,16 @@ function setSpeed(s) {
   if (s === 'slow') tickMs = 15000;
   else if (s === 'fast') tickMs = 3000;
   else tickMs = 8000;
-  document.querySelectorAll('.speed-btn').forEach(b => b.classList.toggle('active', b.dataset.speed === s));
+
+  document.querySelectorAll('.speed-btn').forEach(b => {
+    const btn = b;
+    btn.classList.toggle('active', btn.dataset.speed === s);
+    // Update button text to show timing
+    if (btn.dataset.speed === 'slow') btn.textContent = 'Slow (15s)';
+    if (btn.dataset.speed === 'normal') btn.textContent = 'Normal (8s)';
+    if (btn.dataset.speed === 'fast') btn.textContent = 'Fast (3s)';
+  });
+
   if (gameRunning) startLoop();
 }
 
@@ -327,6 +489,25 @@ function renderHeader() {
     submitBtn.style.display = 'inline-block';
   } else {
     submitBtn.style.display = 'none';
+  }
+
+  // Challenge progress indicator
+  const challengeProgress = document.getElementById('challenge-progress');
+  if (challengeProgress && S.competitiveMode && window.CONFIG?.CHALLENGES?.[S.challengeId]) {
+    const challenge = window.CONFIG.CHALLENGES[S.challengeId];
+    if (challenge.weekLimit) {
+      const totalWeeks = (S.year - 1) * 52 + S.week;
+      const percentage = Math.round(totalWeeks / challenge.weekLimit * 100);
+      challengeProgress.style.display = 'block';
+      const progressText = document.getElementById('challenge-progress-text');
+      if (progressText) {
+        progressText.textContent = `Week ${totalWeeks} / ${challenge.weekLimit} (${percentage}%)`;
+      }
+    } else {
+      challengeProgress.style.display = 'none';
+    }
+  } else if (challengeProgress) {
+    challengeProgress.style.display = 'none';
   }
 }
 
@@ -406,6 +587,21 @@ function renderLeftCol() {
   if (apIndicator) {
     apIndicator.classList.toggle('visible', S.autopilot?.enabled);
   }
+
+  // Autopilot button UI sync - Update button to reflect state
+  const apToggleBtn = document.getElementById('autopilot-toggle');
+  const apStatusSpan = document.getElementById('autopilot-status');
+  if (apToggleBtn && apStatusSpan && S.autopilot) {
+    if (S.autopilot.enabled) {
+      apStatusSpan.textContent = '⏸ Disable Autopilot';
+      apToggleBtn.style.backgroundColor = 'var(--green)';
+      apToggleBtn.style.color = '#fff';
+    } else {
+      apStatusSpan.textContent = '▶ Enable Autopilot';
+      apToggleBtn.style.backgroundColor = '';
+      apToggleBtn.style.color = '';
+    }
+  }
 }
 
 function renderAlerts() {
@@ -466,10 +662,154 @@ function renderCenterCol() {
   renderPL();
 }
 
+// ============================================================
+// TABLE RENDERING OPTIMIZATION - Helper functions
+// ============================================================
+
+function hasInventoryChanged(item, lastState) {
+  if (!lastState) return true;
+
+  return lastState.status !== item.status ||
+    lastState.onHand !== item.inv.onHand ||
+    lastState.lastSold !== item.inv.lastSold ||
+    Math.abs(lastState.price - item.inv.price) > 0.01 ||
+    lastState.order !== item.inv.order ||
+    Math.abs(lastState.margin - item.margin) > 0.1 ||
+    lastState.arrivalWk !== item.inv.arrivalWk ||
+    lastState.fanFavorite !== (Game.S.fanFavorites[item.id] || false);
+}
+
+function createInventoryRow(item) {
+  const { id, inv, cat, margin, sugg, status, sensLabel } = item;
+  const S = Game.S;
+
+  const tr = document.createElement('tr');
+  tr.dataset.productId = id;
+  tr.className = status === 'TRENDING' ? 'row-trend'
+               : status === 'STOCKOUT' ? 'row-stockout'
+               : status === 'LOW' ? 'row-low'
+               : status === 'PENDING' ? 'row-pending' : '';
+
+  const pending = status === 'PENDING';
+  const statusIcons = {
+    'TRENDING': '🔥',
+    'STOCKOUT': '❌',
+    'LOW': '⚠️',
+    'PENDING': '📦',
+    'STOCKED': '✓'
+  };
+  const statusIcon = statusIcons[status] || '';
+
+  let onHandStr = inv.onHand;
+  if (pending) {
+    const weeksUntil = inv.arrivalWk - S.week;
+    onHandStr = `<span style="color:#4466cc;font-size:10px">Arriving in ${weeksUntil} week${weeksUntil > 1 ? 's' : ''}</span>`;
+  }
+
+  const sensColor = sensLabel === 'INELASTIC' || sensLabel === 'LOW' ? 'var(--green)'
+                  : sensLabel === 'NEUTRAL' ? 'var(--ink)'
+                  : sensLabel === 'ELASTIC' ? 'var(--amber)' : 'var(--accent)';
+
+  const ffBadge = S.fanFavorites[id] ? '<span style="color:var(--green);font-size:9px;margin-left:3px">★FF</span>' : '';
+  const catTagClass = cat.limited ? 'cat-tag seasonal' : 'cat-tag';
+
+  tr.innerHTML = `
+    <td>
+      <div style="font-weight:700;font-size:11px;">${cat.name}${ffBadge}</div>
+      <div><span class="${catTagClass}">${cat.cat}</span></div>
+    </td>
+    <td>
+      <input class="price-input" type="number" step="0.01" value="${inv.price.toFixed(2)}"
+        min="${cat.cost}" inputmode="decimal" onchange="handlePrice('${id}', this.value)">
+      <div style="font-size:9px;color:var(--muted);margin-top:1px;">min: $${cat.cost.toFixed(2)}</div>
+    </td>
+    <td style="font-weight:700;">${margin.toFixed(0)}%</td>
+    <td><span style="font-family:var(--mono);font-size:10px;color:${sensColor};font-weight:700;">${sensLabel}</span></td>
+    <td style="font-weight:${inv.onHand < 10 ? '700' : '400'}">${onHandStr}</td>
+    <td>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <input class="order-input" type="number" value="${inv.order}" min="0"
+          inputmode="numeric" onchange="handleOrder('${id}', this.value)">
+        <button class="btn-tiny" onclick="applySuggestion('${id}')" title="Apply suggested order">✓</button>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:1px;">sugg: ${sugg}</div>
+    </td>
+    <td>${inv.lastSold}</td>
+    <td><span class="status-badge ${status}">${statusIcon} ${status}</span></td>
+    <td><button class="btn-link" onclick="doDiscontinue('${id}')">Drop</button></td>
+  `;
+
+  return tr;
+}
+
+function updateInventoryRow(row, item) {
+  const { id, inv, cat, margin, sugg, status, sensLabel } = item;
+  const S = Game.S;
+
+  // Update row class
+  row.className = status === 'TRENDING' ? 'row-trend'
+               : status === 'STOCKOUT' ? 'row-stockout'
+               : status === 'LOW' ? 'row-low'
+               : status === 'PENDING' ? 'row-pending' : '';
+
+  const cells = row.cells;
+
+  // Cell 0: Product name with fan favorite badge
+  const ffBadge = S.fanFavorites[id] ? '<span style="color:var(--green);font-size:9px;margin-left:3px">★FF</span>' : '';
+  const productNameDiv = cells[0].querySelector('div:first-child');
+  if (productNameDiv) {
+    productNameDiv.innerHTML = `${cat.name}${ffBadge}`;
+  }
+
+  // Cell 1: Price input (preserve focus)
+  const priceInput = cells[1].querySelector('.price-input');
+  if (priceInput && document.activeElement !== priceInput) {
+    if (Math.abs(parseFloat(priceInput.value) - inv.price) > 0.01) {
+      priceInput.value = inv.price.toFixed(2);
+    }
+  }
+
+  // Cell 2: Margin
+  cells[2].textContent = margin.toFixed(0) + '%';
+
+  // Cell 4: On Hand
+  const pending = status === 'PENDING';
+  let onHandStr = inv.onHand;
+  if (pending) {
+    const weeksUntil = inv.arrivalWk - S.week;
+    onHandStr = `<span style="color:#4466cc;font-size:10px">Arriving in ${weeksUntil} week${weeksUntil > 1 ? 's' : ''}</span>`;
+  }
+  cells[4].innerHTML = onHandStr;
+  cells[4].style.fontWeight = inv.onHand < 10 ? '700' : '400';
+
+  // Cell 5: Order input (preserve focus) + suggestion
+  const orderInput = cells[5].querySelector('.order-input');
+  if (orderInput && document.activeElement !== orderInput) {
+    if (parseInt(orderInput.value) !== inv.order) {
+      orderInput.value = inv.order;
+    }
+  }
+  const suggDiv = cells[5].querySelector('div:last-child');
+  if (suggDiv) suggDiv.textContent = `sugg: ${sugg}`;
+
+  // Cell 6: Last Sold
+  cells[6].textContent = inv.lastSold;
+
+  // Cell 7: Status badge
+  const statusIcons = {
+    'TRENDING': '🔥',
+    'STOCKOUT': '❌',
+    'LOW': '⚠️',
+    'PENDING': '📦',
+    'STOCKED': '✓'
+  };
+  const statusIcon = statusIcons[status] || '';
+  cells[7].innerHTML = `<span class="status-badge ${status}">${statusIcon} ${status}</span>`;
+}
+
 function renderInventoryTable() {
   const S = Game.S;
   const tbody = document.getElementById('inv-tbody');
-  tbody.innerHTML = '';
 
   // Build item list
   let items = [];
@@ -486,8 +826,6 @@ function renderInventoryTable() {
 
     // Get explicit status from helper
     const status = Game.getProductStatus(id);
-    const pending = status === 'PENDING';
-
     const margin = inv.price > 0 ? ((inv.price - cat.cost) / inv.price * 100) : 0;
     const sugg = Game.suggestedOrder(id);
     const sensLabel = Game.elasticityLabel(cat.elasticity);
@@ -508,72 +846,67 @@ function renderInventoryTable() {
     }
   });
 
+  // Empty state
   if (items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-family:var(--mono);font-size:11px;">No SKUs match this filter. Use [+ Source Product] to add items.</td></tr>`;
+    const filterName = S.filter === 'all' ? 'inventory' : S.filter;
+    tbody.innerHTML = `
+      <tr class="empty-state">
+        <td colspan="9">
+          <div class="empty-state-icon">📦</div>
+          <div class="empty-state-title">No ${filterName} products</div>
+          <div class="empty-state-message">
+            ${S.filter === 'all'
+              ? 'Switch to "Available to Source" tab to add products to your store.'
+              : `No ${S.filter} products in inventory. Try "All" filter or source new items.`}
+          </div>
+        </td>
+      </tr>
+    `;
+    lastInventoryState = {};
     return;
   }
 
-  items.forEach(({ id, inv, cat, margin, sugg, status, sensLabel }) => {
-    const tr = document.createElement('tr');
-    tr.className = status === 'TRENDING' ? 'row-trend'
-                 : status === 'STOCKOUT' ? 'row-stockout'
-                 : status === 'LOW'      ? 'row-low'
-                 : status === 'PENDING'  ? 'row-pending'
-                 : '';
+  // Check if full rebuild is needed
+  const needsFullRebuild =
+    tbody.children.length !== items.length ||
+    S.filter !== lastRenderFilter ||
+    S.sort !== lastRenderSort;
 
-    const pending = status === 'PENDING';
+  if (needsFullRebuild) {
+    // Full rebuild - clear and recreate all rows
+    tbody.innerHTML = '';
+    items.forEach(item => {
+      tbody.appendChild(createInventoryRow(item));
+    });
+    lastRenderFilter = S.filter;
+    lastRenderSort = S.sort;
+    clearTableHighlight(); // Reset keyboard navigation state
+  } else {
+    // Selective update - only update changed cells
+    const rows = Array.from(tbody.children);
+    items.forEach((item, index) => {
+      const row = rows[index];
+      const lastState = lastInventoryState[item.id];
 
-    // Status icons and improved arrival display
-    const statusIcons = {
-      'TRENDING': '🔥',
-      'STOCKOUT': '❌',
-      'LOW': '⚠️',
-      'PENDING': '📦',
-      'STOCKED': '✓'
+      if (hasInventoryChanged(item, lastState)) {
+        updateInventoryRow(row, item);
+      }
+    });
+  }
+
+  // Save current state for next render
+  lastInventoryState = {};
+  items.forEach(item => {
+    lastInventoryState[item.id] = {
+      status: item.status,
+      onHand: item.inv.onHand,
+      lastSold: item.inv.lastSold,
+      price: item.inv.price,
+      order: item.inv.order,
+      margin: item.margin,
+      arrivalWk: item.inv.arrivalWk,
+      fanFavorite: Game.S.fanFavorites[item.id] || false
     };
-    const statusIcon = statusIcons[status] || '';
-
-    // Better arrival display with weeks remaining
-    let onHandStr = inv.onHand;
-    if (pending) {
-      const weeksUntil = inv.arrivalWk - S.week;
-      onHandStr = `<span style="color:#4466cc;font-size:10px">Arriving in ${weeksUntil} week${weeksUntil > 1 ? 's' : ''}</span>`;
-    }
-
-    const sensColor = sensLabel === 'INELASTIC' || sensLabel === 'LOW' ? 'var(--green)'
-                    : sensLabel === 'NEUTRAL' ? 'var(--ink)'
-                    : sensLabel === 'ELASTIC' ? 'var(--amber)'
-                    : 'var(--accent)';
-
-    const ffBadge = Game.S.fanFavorites[id] ? '<span style="color:var(--green);font-size:9px;margin-left:3px">★FF</span>' : '';
-    const catTagClass = cat.limited ? 'cat-tag seasonal' : 'cat-tag';
-
-    tr.innerHTML = `
-      <td>
-        <div style="font-weight:700;font-size:11px;">${cat.name}${ffBadge}</div>
-        <div><span class="${catTagClass}">${cat.cat}</span></div>
-      </td>
-      <td>
-        <input class="price-input" type="number" step="0.01" value="${inv.price.toFixed(2)}"
-          min="${cat.cost}" inputmode="decimal" onchange="handlePrice('${id}', this.value)">
-        <div style="font-size:9px;color:var(--muted);margin-top:1px;">min: $${cat.cost.toFixed(2)}</div>
-      </td>
-      <td style="font-weight:700;">${margin.toFixed(0)}%</td>
-      <td><span style="font-family:var(--mono);font-size:10px;color:${sensColor};font-weight:700;">${sensLabel}</span></td>
-      <td style="font-weight:${inv.onHand < 10 ? '700' : '400'}">${onHandStr}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:4px;">
-          <input class="order-input" type="number" value="${inv.order}" min="0"
-            inputmode="numeric" onchange="handleOrder('${id}', this.value)">
-          <button class="btn-tiny" onclick="applySuggestion('${id}')" title="Apply suggested order">✓</button>
-        </div>
-        <div style="font-size:9px;color:var(--muted);margin-top:1px;">sugg: ${sugg}</div>
-      </td>
-      <td>${inv.lastSold}</td>
-      <td><span class="status-badge ${status}">${statusIcon} ${status}</span></td>
-      <td><button class="btn-link" onclick="doDiscontinue('${id}')">Drop</button></td>
-    `;
-    tbody.appendChild(tr);
   });
 }
 
@@ -881,10 +1214,31 @@ function renderKPIs() {
     ['Rent / Revenue',      rentPct + '%',  parseFloat(rentPct)  < 25 ? 'num-pos' : 'num-neg'],
   ];
 
+  const kpiTooltips = {
+    'Cumulative Profit': 'Total profit across all weeks of operation',
+    'Revenue / SKU Slot': 'Revenue per product slot - higher is better. Target: $2000+/week',
+    'Gross Margin %': 'Revenue minus cost of goods sold. Target: 28%+',
+    'Waste / COGS': 'Perishable waste as % of costs. Keep under 8%',
+    'Stockout Rate': '% of products out of stock. Damages demand after Week 8. Target: <10%',
+    'Customer Trust': 'Pricing trust based on markup history. Penalty if overpricing',
+    'Labor / Revenue': 'Labor cost as % of revenue. Target: <15%',
+    'Rent / Revenue': 'Rent as % of revenue. Target: <25%'
+  };
+
   kpis.forEach(([lbl, val, cls]) => {
     const row = document.createElement('div');
     row.className = 'kpi-row';
-    row.innerHTML = `<span class="kpi-lbl">${lbl}</span><span class="kpi-val ${cls}">${val}</span>`;
+
+    const tooltip = kpiTooltips[lbl] || '';
+    row.innerHTML = `
+      <span class="kpi-lbl">
+        <span class="tooltip-wrapper">
+          <span class="tooltip-trigger">${lbl}</span>
+          <span class="tooltip">${tooltip}</span>
+        </span>
+      </span>
+      <span class="kpi-val ${cls}">${val}</span>
+    `;
     container.appendChild(row);
   });
 }
@@ -915,25 +1269,31 @@ function handlePrice(id, val) {
   const cat = Game.getCat(id);
   if (!cat) return;
 
+  const input = event.target;
   const validation = Game.Validators.price(val, cat);
+
   if (!validation.valid) {
-    alert('⚠️ Invalid Price\n\n' + validation.error);
-    render(); // Reset input to previous value
+    showInputError(input, validation.error);
+    input.value = Game.S.inventory[id].price.toFixed(2);
     return;
   }
 
+  showInputSuccess(input);
   Game.setPrice(id, validation.value);
   render();
 }
 
 function handleOrder(id, val) {
+  const input = event.target;
   const validation = Game.Validators.order(val);
+
   if (!validation.valid) {
-    alert('⚠️ Invalid Order Quantity\n\n' + validation.error);
-    render(); // Reset input to previous value
+    showInputError(input, validation.error);
+    input.value = Game.S.inventory[id].order;
     return;
   }
 
+  showInputSuccess(input);
   Game.setOrder(id, validation.value);
   // No render needed here - order changes don't affect display until next tick
 }
@@ -959,8 +1319,50 @@ function doDiscontinue(id) {
     message = `Discontinue ${cat ? cat.name : id}?\n\nThis will free up a SKU slot.`;
   }
 
-  if (confirm(message)) {
+  showConfirm(message, () => {
+    const productName = cat ? cat.name : id;
     Game.discontinueProduct(id);
+    render();
+    showUndoNotification(productName);
+  }, 'DISCONTINUE PRODUCT');
+}
+
+function showUndoNotification(productName) {
+  const notif = document.createElement('div');
+  notif.className = 'undo-notification';
+  notif.innerHTML = `
+    <span style="font-family:var(--mono);font-size:12px;">${productName} discontinued</span>
+    <button class="btn-link" style="color:#fff;margin-left:16px;text-decoration:underline;" onclick="handleUndo()">UNDO</button>
+  `;
+  notif.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: var(--bg);
+    padding: 12px 20px;
+    border-radius: 4px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    z-index: 1003;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  `;
+
+  document.body.appendChild(notif);
+
+  setTimeout(() => {
+    notif.style.opacity = '0';
+    notif.style.transition = 'opacity 0.3s';
+    setTimeout(() => notif.remove(), 300);
+  }, 10000);
+}
+
+function handleUndo() {
+  if (Game.undoDiscontinue && Game.undoDiscontinue()) {
+    const notif = document.querySelector('.undo-notification');
+    if (notif) notif.remove();
     render();
   }
 }
@@ -1074,11 +1476,15 @@ function confirmPrestige() {
 }
 
 function doHardReset() {
-  if (confirm('Permanently wipe all save data and restart?')) {
-    stopLoop();
-    Game.hardReset();
-    location.reload();
-  }
+  showConfirm(
+    'Permanently wipe all save data and restart? This cannot be undone.',
+    () => {
+      stopLoop();
+      Game.hardReset();
+      location.reload();
+    },
+    'RESET GAME'
+  );
 }
 
 // ============================================================
@@ -1145,7 +1551,35 @@ function startTutorial() {
   stopLoop();
 
   showTutorialStep(0);
-  document.getElementById('tutorial-overlay').classList.add('show');
+
+  const tutorialOverlay = document.getElementById('tutorial-overlay');
+  if (tutorialOverlay) {
+    tutorialOverlay.classList.add('show');
+  } else {
+    console.error('[TUTORIAL] Overlay element not found! Skipping tutorial.');
+    S.tutorial = {
+      active: false,
+      completed: false,
+      dismissed: true,
+      pauseGame: false,
+      wasRunning: false,
+      currentStep: 0
+    };
+    startLoop(); // Start game immediately if overlay missing
+    render();
+  }
+
+  // Auto-skip tutorial if overlay doesn't show within 5 seconds
+  setTimeout(() => {
+    if (S.tutorial?.active) {
+      const overlayVisible = tutorialOverlay?.classList.contains('show');
+      if (!overlayVisible) {
+        console.error('[TUTORIAL] Overlay failed to show. Auto-skipping...');
+        skipTutorialForce();
+      }
+    }
+  }, 5000);
+
   Game.saveGame();
 }
 
@@ -1221,23 +1655,27 @@ function completeTutorial() {
 }
 
 function skipTutorial() {
-  if (confirm('Skip the tutorial? You can always refer to the event log for tips.')) {
-    const S = Game.S;
-    const wasRunning = S.tutorial?.wasRunning || false;
+  showConfirm(
+    'Skip the tutorial? You can always refer to the event log and help menu for guidance.',
+    () => {
+      const S = Game.S;
+      const wasRunning = S.tutorial?.wasRunning || false;
 
-    S.tutorial.active = false;
-    S.tutorial.dismissed = true;
+      S.tutorial.active = false;
+      S.tutorial.dismissed = true;
 
-    document.getElementById('tutorial-overlay').classList.remove('show');
-    clearHighlight();
+      document.getElementById('tutorial-overlay').classList.remove('show');
+      clearHighlight();
 
-    // Restore previous loop state (only start if it was running before)
-    // For new games, wasRunning is typically false, so we start the game
-    startLoop();
+      // Restore previous loop state (only start if it was running before)
+      // For new games, wasRunning is typically false, so we start the game
+      startLoop();
 
-    Game.saveGame();
-    render();
-  }
+      Game.saveGame();
+      render();
+    },
+    'SKIP TUTORIAL'
+  );
 }
 
 function highlightElement(selector) {
@@ -1271,24 +1709,28 @@ function doBankruptRestart() {
 }
 
 function handleCrewChange() {
-  const crewValue = document.getElementById('inp-crew').value;
-  const wageValue = document.getElementById('inp-wage').value;
+  const crewInput = document.getElementById('inp-crew');
+  const wageInput = document.getElementById('inp-wage');
+  const crewValue = crewInput.value;
+  const wageValue = wageInput.value;
 
   // Validate crew count
   const crewValidation = Game.Validators.crew(crewValue);
   if (!crewValidation.valid) {
-    alert('⚠️ Invalid Crew Count\n\n' + crewValidation.error);
-    document.getElementById('inp-crew').value = Game.S.crew;
+    showInputError(crewInput, crewValidation.error);
+    crewInput.value = Game.S.crew;
   } else {
+    showInputSuccess(crewInput);
     Game.S.crew = crewValidation.value;
   }
 
   // Validate wage
   const wageValidation = Game.Validators.wage(wageValue);
   if (!wageValidation.valid) {
-    alert('⚠️ Invalid Wage\n\n' + wageValidation.error);
-    document.getElementById('inp-wage').value = Game.S.wage;
+    showInputError(wageInput, wageValidation.error);
+    wageInput.value = Game.S.wage;
   } else {
+    showInputSuccess(wageInput);
     Game.S.wage = wageValidation.value;
   }
 
@@ -1315,15 +1757,21 @@ window.showSaveIndicator = function() {
 
 function togglePause() {
   const btn = document.getElementById('pause-btn');
+  const overlay = document.getElementById('pause-overlay');
+
   if (gameRunning) {
     stopLoop();
     btn.textContent = '▶ Play';
     btn.style.backgroundColor = 'var(--green)';
+    btn.style.color = '#fff';
+    if (overlay) overlay.style.display = 'block';
     console.log('[PAUSE] Game paused');
   } else {
     startLoop();
     btn.textContent = '⏸ Pause';
     btn.style.backgroundColor = '';
+    btn.style.color = '';
+    if (overlay) overlay.style.display = 'none';
     console.log('[PAUSE] Game resumed');
   }
 }
@@ -1652,3 +2100,140 @@ async function switchLeaderboardTab(mode) {
   });
   await loadLeaderboard(mode);
 }
+
+// ============================================================
+// EMERGENCY CONTROLS - Detects stuck state and provides recovery
+// ============================================================
+
+// Check for stuck state every 2 seconds
+setInterval(() => {
+  const S = Game?.S;
+  const emergencyControls = document.getElementById('emergency-controls');
+
+  if (!S || !emergencyControls) return;
+
+  // Game is stuck if:
+  // 1. In play phase AND
+  // 2. Game loop not running AND
+  // 3. Tutorial not active AND
+  // 4. No modal is open
+  const isStuck = S.gamePhase === 'play' &&
+                  !gameRunning &&
+                  !S.tutorial?.active &&
+                  !ModalManager.isOpen();
+
+  emergencyControls.style.display = isStuck ? 'block' : 'none';
+}, 2000);
+
+function forceStartGame() {
+  console.log('[EMERGENCY] Force starting game...');
+  const S = Game.S;
+
+  // Clear tutorial state
+  S.tutorial = {
+    active: false,
+    completed: true,
+    dismissed: true,
+    pauseGame: false,
+    wasRunning: false,
+    currentStep: 0
+  };
+
+  // Close all modals
+  ModalManager.closeAll();
+
+  // Remove tutorial overlay
+  document.getElementById('tutorial-overlay')?.classList.remove('show');
+
+  // Reset loop state
+  if (tickId) {
+    clearInterval(tickId);
+    tickId = null;
+  }
+  gameRunning = false;
+
+  // Start fresh
+  startLoop();
+  render();
+  Game.saveGame();
+
+  Game.log('[EMERGENCY] Game force-started by user.');
+  alert('✅ Game restarted. If issues persist, try Export Save → Hard Reset → Import Save.');
+}
+
+function skipTutorialForce() {
+  console.log('[EMERGENCY] Force skipping tutorial...');
+  const S = Game.S;
+  S.tutorial = {
+    active: false,
+    completed: false,
+    dismissed: true,
+    pauseGame: false,
+    wasRunning: false,
+    currentStep: 0
+  };
+
+  document.getElementById('tutorial-overlay')?.classList.remove('show');
+  forceStartGame();
+}
+
+// ============================================================
+// GAME STATE HEARTBEAT - Auto-recovery system
+// ============================================================
+
+let lastTickWeek = 0;
+let stuckCheckCount = 0;
+let lastTickTime = Date.now();
+
+setInterval(() => {
+  const S = Game?.S;
+  if (!S || S.gamePhase !== 'play') {
+    stuckCheckCount = 0;
+    return;
+  }
+
+  const now = Date.now();
+
+  // Check 1: Game should be running but isn't
+  const shouldBeRunning = !S.tutorial?.active && !ModalManager.isOpen();
+
+  if (shouldBeRunning && !gameRunning) {
+    stuckCheckCount++;
+    console.warn(`[HEARTBEAT] Game stuck detection #${stuckCheckCount}. Week: ${S.week}, gameRunning: ${gameRunning}`);
+
+    if (stuckCheckCount >= 3) {
+      console.error('[HEARTBEAT] Game confirmed stuck. Auto-recovering...');
+      gameRunning = false; // Reset flag
+      tickId = null; // Clear tickId
+      startLoop();
+      render();
+      stuckCheckCount = 0;
+      Game.log('[SYSTEM] Auto-recovery: Game loop restarted.');
+    }
+  } else {
+    stuckCheckCount = 0;
+  }
+
+  // Check 2: Week not advancing (infinite loop detection)
+  if (gameRunning) {
+    const timeSinceLastTick = now - lastTickTime;
+
+    if (S.week === lastTickWeek && timeSinceLastTick > tickMs * 3) {
+      console.warn(`[HEARTBEAT] Week ${S.week} hasn't changed in ${(timeSinceLastTick/1000).toFixed(1)}s. Expected tick every ${(tickMs/1000).toFixed(1)}s.`);
+
+      // If week hasn't changed in 30 seconds despite game running, restart loop
+      if (timeSinceLastTick > 30000) {
+        console.error('[HEARTBEAT] Week stuck. Restarting game loop.');
+        stopLoop();
+        startLoop();
+        Game.log('[SYSTEM] Auto-recovery: Week advancement detected as stuck.');
+      }
+    }
+
+    if (S.week !== lastTickWeek) {
+      lastTickTime = now;
+      lastTickWeek = S.week;
+    }
+  }
+
+}, 10000); // Check every 10 seconds

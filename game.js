@@ -318,10 +318,17 @@ function saveGame() {
     const sizeKB = new Blob([data]).size / 1024;
     if (sizeKB > 4096) {
       console.warn(`Save data large: ${sizeKB.toFixed(1)}KB`);
+
       // Trim logs if too large
       if (S.logs.length > 40) {
         S.logs = S.logs.slice(0, 40);
+        console.log('[SAVE] Trimmed logs to reduce save size. Retrying...');
         return saveGame(); // Retry with smaller data
+      } else {
+        // Can't trim further - save will likely fail
+        console.error('[SAVE] Save data too large and cannot be trimmed further.');
+        alert('⚠️ WARNING: Save data exceeds 4MB.\n\nYour progress may not save automatically.\n\nRECOMMENDED: Export your save file NOW as backup.\n\n(Menu → Export Game Data)');
+        // Try anyway
       }
     }
 
@@ -635,9 +642,20 @@ function sourceProduct(id) {
   return { ok:true };
 }
 
+// Undo stack for product discontinuation
+let undoStack = null;
+
 function discontinueProduct(id) {
   const cat = getCat(id);
   const inv = S.inventory[id];
+
+  // Store for undo (10 second window)
+  undoStack = {
+    id: id,
+    inventory: { ...inv },
+    productName: cat ? cat.name : id,
+    timestamp: Date.now()
+  };
 
   // Calculate inventory liquidation value (50% recovery)
   const writeOffValue = inv && cat ? Math.round(inv.onHand * cat.cost * 0.50) : 0;
@@ -654,6 +672,37 @@ function discontinueProduct(id) {
   }
 
   saveGame();
+
+  // Clear undo after 10 seconds
+  setTimeout(() => {
+    if (undoStack && undoStack.id === id && Date.now() - undoStack.timestamp >= 10000) {
+      undoStack = null;
+    }
+  }, 10000);
+}
+
+function undoDiscontinue() {
+  if (!undoStack) return false;
+
+  const { id, inventory, productName } = undoStack;
+
+  // Reverse cash adjustment
+  const cat = getCat(id);
+  const writeOffValue = cat ? Math.round(inventory.onHand * cat.cost * 0.50) : 0;
+  if (writeOffValue > 0) {
+    S.cash -= writeOffValue;
+  }
+
+  S.inventory[id] = inventory;
+  log(`[UNDO] ${productName} restored to inventory.`);
+  saveGame();
+  undoStack = null;
+
+  return true;
+}
+
+function hasUndo() {
+  return undoStack !== null;
 }
 
 function setPrice(id, val) {
@@ -757,6 +806,7 @@ function processAutopilot() {
 
   // Decision 1: ORDERING (uses existing suggested order formula)
   if (AP.decisions.ordering) {
+    let ordersChanged = 0;
     for (const id in S.inventory) {
       const inv = S.inventory[id];
       const cat = getCat(id);
@@ -769,12 +819,23 @@ function processAutopilot() {
       if (!isSeasonalAvailable(cat)) continue;
 
       // Use suggested order formula
+      const oldOrder = inv.order;
       inv.order = suggestedOrder(id);
+
+      // Log significant changes (not 0→0 or small adjustments)
+      if (Math.abs(inv.order - oldOrder) > 5) {
+        ordersChanged++;
+      }
+    }
+
+    if (ordersChanged > 0) {
+      log(`[AUTOPILOT] Updated ${ordersChanged} product order quantities.`);
     }
   }
 
   // Decision 2: PRICING (30% margin, respect cost floor, cap by elasticity)
   if (AP.decisions.pricing) {
+    let pricingChanged = 0;
     for (const id in S.inventory) {
       const inv = S.inventory[id];
       const cat = getCat(id);
@@ -799,14 +860,30 @@ function processAutopilot() {
       // Floor: never below cost
       targetPrice = Math.max(targetPrice, effectiveCost);
 
+      const oldPrice = inv.price;
       inv.price = parseFloat(targetPrice.toFixed(2));
+
+      // Log price changes
+      if (Math.abs(inv.price - oldPrice) > 0.10) {
+        pricingChanged++;
+      }
+    }
+
+    if (pricingChanged > 0) {
+      log(`[AUTOPILOT] Optimized ${pricingChanged} product prices for target margin.`);
     }
   }
 
   // Decision 3: STAFFING (hire suggested crew, pay safe wage)
   if (AP.decisions.staffing) {
+    const oldCrew = S.crew;
+    const oldWage = S.wage;
     S.crew = suggestedCrew();
     S.wage = AP.config.safeWage;
+
+    if (oldCrew !== S.crew || Math.abs(oldWage - S.wage) > 0.5) {
+      log(`[AUTOPILOT] Staffing adjusted: ${oldCrew}→${S.crew} crew, $${oldWage}→$${S.wage}/hr.`);
+    }
   }
 
   // Decision 4: SOURCING (strategic product additions)
@@ -1374,6 +1451,8 @@ window.Game = {
   doPrestige,
   sourceProduct,
   discontinueProduct,
+  undoDiscontinue,
+  hasUndo,
   setPrice,
   setOrder,
   seedStartingInventory,

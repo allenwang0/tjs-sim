@@ -67,14 +67,21 @@
   <div id="app-header">
     <h1>TRADER JOE'S <span>SIMULATOR</span> &nbsp;// <span id="hdr-loc" style="color:var(--muted);font-weight:400;font-size:12px;">—</span></h1>
     <div id="save-indicator" style="position:fixed;top:10px;right:10px;font-family:var(--mono);font-size:10px;color:var(--green);opacity:0;transition:opacity 0.3s;">✓ Saved</div>
+
+    <!-- Challenge Progress Indicator -->
+    <div id="challenge-progress" style="display:none;position:fixed;top:10px;left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--border);padding:6px 12px;font-family:var(--mono);font-size:10px;z-index:101;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+      <div style="color:var(--muted);margin-bottom:2px;text-transform:uppercase;letter-spacing:0.05em;">Challenge</div>
+      <div id="challenge-progress-text" style="font-weight:700;">Week 1 / 52</div>
+    </div>
+
     <div class="header-controls">
       <span style="font-family:var(--mono);font-size:11px;color:var(--muted);">
         <span id="hdr-season" style="color:var(--accent);font-weight:700;"></span>
         &nbsp;<span id="hdr-week"></span>
       </span>
       <div class="speed-btns">
-        <button class="btn" id="pause-btn" onclick="togglePause()" style="margin-right:12px;">⏸ Pause</button>
-        <button class="btn" onclick="manualTick()" style="margin-right:12px;background:var(--accent);color:#fff;" title="Force advance one week">⏭ Advance Week</button>
+        <button class="btn" id="pause-btn" onclick="togglePause()" aria-label="Pause or resume game" style="margin-right:12px;">⏸ Pause</button>
+        <button class="btn" onclick="manualTick()" aria-label="Force advance one week" style="margin-right:12px;background:var(--accent);color:#fff;" title="Force advance one week">⏭ Advance Week</button>
         <span style="color:var(--muted)">Speed:</span>
         <button class="speed-btn" data-speed="slow" onclick="setSpeed('slow')">Slow</button>
         <span>|</span>
@@ -82,13 +89,30 @@
         <span>|</span>
         <button class="speed-btn" data-speed="fast" onclick="setSpeed('fast')">Fast</button>
       </div>
-      <button class="btn" id="prestige-btn" onclick="openPrestige()">New Store (Prestige)</button>
-      <button class="btn" id="submit-score-btn" onclick="openSubmitScore()" style="display:none;">Submit Score</button>
-      <button class="btn" onclick="toggleLeaderboard()">Leaderboard</button>
-      <button class="btn-link" onclick="exportGameData()">Export Data</button>
-      <button class="btn-link" onclick="toggleHelp()">Help (?)</button>
-      <button class="btn-link" onclick="doHardReset()">Reset</button>
+      <button class="btn" id="prestige-btn" onclick="openPrestige()" aria-label="Start new store with prestige benefits">New Store (Prestige)</button>
+      <button class="btn" id="submit-score-btn" onclick="openSubmitScore()" style="display:none;" aria-label="Submit your score to leaderboard">Submit Score</button>
+      <button class="btn" onclick="toggleLeaderboard()" aria-label="View leaderboard">Leaderboard</button>
+      <button class="btn-link" onclick="exportGameData()" aria-label="Export game data as JSON">Export Data</button>
+      <button class="btn-link" onclick="toggleHelp()" aria-label="Show help and keyboard shortcuts">Help (?)</button>
+      <button class="btn-link" onclick="doHardReset()" aria-label="Reset all game data">Reset</button>
     </div>
+  </div>
+
+  <!-- Pause Overlay -->
+  <div id="pause-overlay" style="display:none;position:fixed;top:60px;left:0;right:0;background:rgba(255,255,255,0.95);border-bottom:3px solid var(--accent);padding:12px;z-index:90;text-align:center;">
+    <div style="font-family:var(--mono);font-size:14px;font-weight:700;color:var(--accent);">⏸ GAME PAUSED</div>
+    <div style="font-family:var(--sans);font-size:11px;color:var(--muted);margin-top:4px;">Press SPACE or click Play to resume</div>
+  </div>
+
+  <!-- EMERGENCY CONTROLS - Shows when game is stuck -->
+  <div id="emergency-controls" style="display:none;position:fixed;top:10px;right:10px;z-index:9999;background:var(--accent);color:#fff;padding:12px;border:3px solid var(--ink);box-shadow:0 8px 24px rgba(0,0,0,0.5);max-width:200px;">
+    <div style="font-family:var(--mono);font-size:11px;font-weight:700;margin-bottom:8px;text-align:center;border-bottom:1px solid rgba(255,255,255,0.3);padding-bottom:6px;">⚠️ GAME STUCK?</div>
+    <button class="btn" onclick="forceStartGame()" style="width:100%;margin-bottom:6px;background:#fff;color:var(--ink);font-weight:700;">
+      ▶ Force Start
+    </button>
+    <button class="btn" onclick="skipTutorialForce()" style="width:100%;background:#fff;color:var(--ink);">
+      Skip Tutorial
+    </button>
   </div>
 
   <!-- THREE-COLUMN GRID -->
@@ -101,7 +125,7 @@
       <div class="section-head">Financial Position</div>
 
       <div style="margin-bottom:4px;">
-        <div id="cash-display">$75,000</div>
+        <div id="cash-display" aria-label="Current cash on hand">$75,000</div>
         <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:4px;">CASH ON HAND</div>
         <div style="font-family:var(--mono);font-size:10px;color:var(--muted);">LAST WEEK</div>
         <div id="last-net" style="font-family:var(--mono);font-size:14px;font-weight:700;">+$0</div>
@@ -138,7 +162,7 @@
       <div id="op-state" style="font-family:var(--mono);font-size:10px;font-weight:700;text-transform:uppercase;padding:3px 7px;border:1px solid var(--green);color:var(--green);display:inline-block;margin-top:4px;margin-bottom:12px;">NOMINAL</div>
 
       <div class="section-head">Alerts</div>
-      <div id="alerts-container"></div>
+      <div id="alerts-container" role="alert" aria-live="polite" aria-atomic="true"></div>
 
       <div id="autopilot-section">
         <div class="section-head">Autopilot</div>
@@ -146,7 +170,7 @@
           <button class="btn" id="autopilot-toggle" onclick="toggleAutopilot()">
             <span id="autopilot-status">▶ Enable Autopilot</span>
           </button>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--muted);margin-top:4px;line-height:1.4;">
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px;line-height:1.4;">
             Auto-manages ordering, pricing, staffing, sourcing. Override anytime.
           </div>
         </div>
@@ -197,21 +221,21 @@
       <!-- INVENTORY TABLE VIEW -->
       <div id="inv-view">
         <div class="table-wrap">
-          <table>
+          <table role="grid" aria-label="Product inventory">
             <thead>
               <tr>
-                <th onclick="setSort('name')">Product</th>
-                <th onclick="setSort('price')">Price</th>
-                <th onclick="setSort('margin')">Margin</th>
-                <th>Sensitivity</th>
-                <th onclick="setSort('onHand')">On Hand</th>
-                <th>Order (sugg)</th>
-                <th onclick="setSort('sold')">Sold</th>
-                <th onclick="setSort('status')">Status</th>
-                <th></th>
+                <th role="columnheader" aria-sort="none" onclick="setSort('name')" tabindex="0">Product</th>
+                <th role="columnheader" aria-sort="none" onclick="setSort('price')" tabindex="0">Price</th>
+                <th role="columnheader" aria-sort="none" onclick="setSort('margin')" tabindex="0">Margin</th>
+                <th role="columnheader">Sensitivity</th>
+                <th role="columnheader" aria-sort="none" onclick="setSort('onHand')" tabindex="0">On Hand</th>
+                <th role="columnheader">Order (sugg)</th>
+                <th role="columnheader" aria-sort="none" onclick="setSort('sold')" tabindex="0">Sold</th>
+                <th role="columnheader" aria-sort="none" onclick="setSort('status')" tabindex="0">Status</th>
+                <th role="columnheader"></th>
               </tr>
             </thead>
-            <tbody id="inv-tbody">
+            <tbody id="inv-tbody" role="rowgroup">
               <tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted);font-size:11px;">Loading inventory...</td></tr>
             </tbody>
           </table>
@@ -225,20 +249,20 @@
           <br><strong>Perishable</strong> items shown in italics — unsold units at week-end incur 20% waste cost.
         </p>
         <div class="table-wrap">
-          <table>
+          <table role="grid" aria-label="Available products to source">
             <thead>
               <tr>
-                <th>Product</th>
-                <th>Cost</th>
-                <th>Base Retail</th>
-                <th>Margin</th>
-                <th>Sensitivity</th>
-                <th>Notes</th>
-                <th>Fee</th>
-                <th></th>
+                <th role="columnheader">Product</th>
+                <th role="columnheader">Cost</th>
+                <th role="columnheader">Base Retail</th>
+                <th role="columnheader">Margin</th>
+                <th role="columnheader">Sensitivity</th>
+                <th role="columnheader">Notes</th>
+                <th role="columnheader">Fee</th>
+                <th role="columnheader"></th>
               </tr>
             </thead>
-            <tbody id="src-tbody">
+            <tbody id="src-tbody" role="rowgroup">
               <tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted);font-size:11px;">Loading catalog...</td></tr>
             </tbody>
           </table>
@@ -275,7 +299,7 @@
       <div id="kpi-container"></div>
 
       <div class="section-head" style="margin-top:16px;">Event Log</div>
-      <div class="log-wrap" id="log-box"></div>
+      <div class="log-wrap" id="log-box" role="log" aria-live="polite" aria-label="Game event log"></div>
 
     </div>
   </div><!-- /game-grid -->
@@ -297,9 +321,9 @@
 <!-- ============================================================
      PRESTIGE MODAL
      ============================================================ -->
-<div id="prestige-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
+<div id="prestige-overlay" role="dialog" aria-modal="true" aria-labelledby="prestige-title" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
   <div style="max-width:600px;padding:40px;border:2px solid var(--accent);background:var(--bg);text-align:left;">
-    <h2 style="margin-bottom:16px;">PRESTIGE — OPEN A NEW STORE</h2>
+    <h2 id="prestige-title" style="margin-bottom:16px;">PRESTIGE — OPEN A NEW STORE</h2>
     <div style="margin-bottom:20px;font-family:var(--sans);font-size:13px;line-height:1.6;">
       <p>You've reached the prestige threshold. Open a new store and carry forward:</p>
       <ul style="margin:12px 0;padding-left:20px;">
@@ -322,9 +346,9 @@
 <!-- ============================================================
      HELP MODAL
      ============================================================ -->
-<div id="help-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
+<div id="help-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
   <div style="max-width:700px;max-height:80vh;overflow-y:auto;padding:40px;border:2px solid var(--accent);background:var(--bg);text-align:left;">
-    <h2 style="margin-bottom:16px;">KEYBOARD SHORTCUTS & TIPS</h2>
+    <h2 id="help-title" style="margin-bottom:16px;">KEYBOARD SHORTCUTS & TIPS</h2>
 
     <div style="font-family:var(--sans);font-size:13px;line-height:1.6;">
       <h3 style="margin-top:20px;color:var(--accent);">Keyboard Shortcuts</h3>
@@ -392,9 +416,9 @@
 <!-- ============================================================
      SUBMIT SCORE OVERLAY
      ============================================================ -->
-<div id="submit-score-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
+<div id="submit-score-overlay" role="dialog" aria-modal="true" aria-labelledby="submit-score-title" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
   <div style="max-width:500px;padding:40px;border:2px solid var(--accent);background:var(--bg);">
-    <h2 style="margin-bottom:16px;">SUBMIT YOUR SCORE</h2>
+    <h2 id="submit-score-title" style="margin-bottom:16px;">SUBMIT YOUR SCORE</h2>
     <div style="font-family:var(--sans);font-size:13px;margin-bottom:20px;">
       <div class="stat-row" style="margin-bottom:8px;"><span class="lbl">Final Score:</span><span class="val mono" style="font-size:18px;font-weight:700;color:var(--green);" id="submit-final-score">$0</span></div>
       <div class="stat-row"><span class="lbl">Time:</span><span class="val mono" id="submit-weeks">Week 1</span></div>
@@ -415,10 +439,10 @@
 <!-- ============================================================
      LEADERBOARD OVERLAY
      ============================================================ -->
-<div id="leaderboard-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;overflow-y:auto;padding:20px;">
+<div id="leaderboard-overlay" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;overflow-y:auto;padding:20px;">
   <div style="max-width:900px;width:100%;max-height:90vh;overflow-y:auto;padding:40px;border:2px solid var(--accent);background:var(--bg);">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-      <h2>LEADERBOARD</h2>
+      <h2 id="leaderboard-title">LEADERBOARD</h2>
       <button class="btn-link" onclick="closeLeaderboard()">Close</button>
     </div>
 
@@ -436,13 +460,13 @@
 <!-- ============================================================
      TUTORIAL OVERLAY
      ============================================================ -->
-<div id="tutorial-overlay" style="display:none;">
+<div id="tutorial-overlay" role="dialog" aria-modal="true" aria-labelledby="tutorial-title" style="display:none;">
   <div class="tutorial-panel">
     <div class="tutorial-header">
-      <div class="tutorial-progress">
+      <div class="tutorial-progress" aria-label="Tutorial progress">
         <span id="tutorial-step-num">1</span> / <span id="tutorial-step-total">17</span>
       </div>
-      <button class="btn-link" onclick="skipTutorial()" style="color:var(--muted);font-size:10px;">Skip Tutorial</button>
+      <button class="btn-link" onclick="skipTutorial()" aria-label="Skip tutorial" style="color:var(--muted);font-size:10px;">Skip Tutorial</button>
     </div>
 
     <h3 id="tutorial-title">Welcome</h3>
@@ -455,6 +479,20 @@
   </div>
 
   <div id="tutorial-highlight-overlay"></div>
+</div>
+
+<!-- ============================================================
+     CONFIRM MODAL
+     ============================================================ -->
+<div id="confirm-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;">
+  <div style="max-width:450px;padding:32px;border:2px solid var(--accent);background:var(--bg);">
+    <h2 id="confirm-modal-title" style="margin-bottom:16px;color:var(--accent);font-size:18px;">CONFIRM ACTION</h2>
+    <div id="confirm-modal-message" style="font-family:var(--sans);font-size:13px;margin-bottom:24px;line-height:1.6;"></div>
+    <div style="display:flex;gap:12px;justify-content:flex-end;">
+      <button class="btn" id="confirm-cancel">Cancel</button>
+      <button class="btn-accent" id="confirm-ok">Confirm</button>
+    </div>
+  </div>
 </div>
 
 </body>
