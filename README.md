@@ -1,5 +1,7 @@
 # TRADER JOE'S SIMULATOR
 
+> **Disclaimer:** This is an unofficial fan project made for fun and learning. It is not affiliated with, endorsed by, or sponsored by Trader Joe's. Trader Joe's and its product names are trademarks of their respective owners and are used here only for reference. Nothing is sold, and no real store data is used.
+
 A strategic inventory management game featuring seasonal cycles, demand economics, and crew management inspired by Trader Joe's retail operations.
 
 ![Game Screenshot](https://img.shields.io/badge/Status-Live-brightgreen) ![Version](https://img.shields.io/badge/Version-3.0-blue)
