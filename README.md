@@ -4,7 +4,7 @@
 
 A strategic inventory management game featuring seasonal cycles, demand economics, and crew management inspired by Trader Joe's retail operations.
 
-![Game Screenshot](https://img.shields.io/badge/Status-Live-brightgreen) ![Version](https://img.shields.io/badge/Version-3.0-blue)
+Play it at https://tjs-sim.vercel.app.
 
 ## Overview
 
